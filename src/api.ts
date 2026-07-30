@@ -22,16 +22,21 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   .name { color:#fff; } .owner { color:#8b97a6; } .num { color:#aeb8c4; } .cache { color:#3fb950; }
   .muted { color:#6e7681; }
   header input { width:50px; background:#0e1116; color:#d6dde6; border:1px solid #2b333d; border-radius:4px; padding:2px 5px; font:inherit; }
+  header button { background:#238636; color:#fff; border:1px solid #2ea043; border-radius:4px; padding:3px 12px; font:inherit; cursor:pointer; }
+  header button:disabled { background:#21262d; color:#6e7681; border-color:#2b333d; cursor:default; }
+  .conn { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .conn.on{background:#3fb950} .conn.off{background:#f85149}
 </style>
 <header>
   <b>minecraft-agents</b>
-  <span class=stat>dispatcher <span id=disp>—</span></span>
+  <span class=stat><span id=conn class="conn off"></span><span id=disp>connecting…</span></span>
   <span class=stat>agents <span id=total>0</span></span>
   <span class=stat>active <span id=active>0</span></span>
   <span class=stat>tokens <span id=tok>0</span></span>
   <span class=stat>traffic <span id=net>0</span></span>
-  <span class=stat>server <input id=host placeholder=host style="width:110px"> : <input id=port type=number style="width:58px"></span>
-  <span class=stat>login <input id=login type=password placeholder="/login <pw>" style="width:120px" title="sent in chat on spawn; reconnects the fleet"></span>
+  <span class=stat>server <input id=host placeholder=host style="width:200px"> : <input id=port type=number style="width:78px"></span>
+  <span class=stat>login <input id=login type=password placeholder="/login <pw>" style="width:150px" title="sent in chat on spawn"></span>
+  <button id=apply disabled title="reconnects the fleet">apply</button>
   <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon, no restart"></span>
   <span class=stat muted id=upd></span>
 </header>
@@ -44,11 +49,21 @@ const k = n => n>=1000 ? (n/1000).toFixed(n>=10000?0:1)+'k' : String(n||0);
 const fb = n => { n=n||0; if(n>=1e9)return (n/1e9).toFixed(2)+'GB'; if(n>=1e6)return (n/1e6).toFixed(1)+'MB'; if(n>=1e3)return (n/1e3).toFixed(0)+'KB'; return n+'B'; };
 const capEl = document.getElementById('cap');
 const hostEl = document.getElementById('host'), portEl = document.getElementById('port'), loginEl = document.getElementById('login');
+const applyEl = document.getElementById('apply');
 const postCfg = patch => fetch('/config', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(patch) });
 capEl.addEventListener('change', () => { const v=Number(capEl.value); if(v>=0) postCfg({ maxPerUser: v }); });
-hostEl.addEventListener('change', () => postCfg({ mcHost: hostEl.value }));
-portEl.addEventListener('change', () => { const p=Number(portEl.value); if(p>0) postCfg({ mcPort: p }); });
-loginEl.addEventListener('change', () => postCfg({ loginMessage: loginEl.value }));
+// Server host/port/login are staged and applied together (they reconnect the fleet).
+let dirty = false;
+const markDirty = () => { dirty = true; applyEl.disabled = false; applyEl.textContent = 'apply'; };
+[hostEl, portEl, loginEl].forEach(el => el.addEventListener('input', markDirty));
+applyEl.addEventListener('click', async () => {
+  const p = Number(portEl.value);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) { applyEl.textContent = 'bad port'; return; }
+  applyEl.disabled = true; applyEl.textContent = 'applying…';
+  const r = await postCfg({ mcHost: hostEl.value.trim(), mcPort: p, loginMessage: loginEl.value }).catch(() => null);
+  if (r && r.ok) { dirty = false; applyEl.textContent = 'applied'; }
+  else { applyEl.disabled = false; applyEl.textContent = 'failed'; }
+});
 async function tick(){
   try {
     const [bots, disp, cfg] = await Promise.all([
@@ -57,10 +72,16 @@ async function tick(){
       fetch('/config').then(r=>r.json()).catch(()=>({})),
     ]);
     if (document.activeElement !== capEl && cfg.maxPerUser != null) capEl.value = cfg.maxPerUser;
-    if (document.activeElement !== hostEl && cfg.mcHost != null) hostEl.value = cfg.mcHost;
-    if (document.activeElement !== portEl && cfg.mcPort != null) portEl.value = cfg.mcPort;
-    if (document.activeElement !== loginEl && cfg.loginMessage != null) loginEl.value = cfg.loginMessage;
-    document.getElementById('disp').textContent = disp.username ? disp.username+(disp.online?' ●':' ○') : '—';
+    if (!dirty) {  // don't clobber staged edits before they're applied
+      if (cfg.mcHost != null) hostEl.value = cfg.mcHost;
+      if (cfg.mcPort != null) portEl.value = cfg.mcPort;
+      if (cfg.loginMessage != null) loginEl.value = cfg.loginMessage;
+    }
+    const online = !!disp.online;
+    document.getElementById('conn').className = 'conn ' + (online?'on':'off');
+    document.getElementById('disp').textContent = disp.username
+      ? disp.username + (online ? ' connected' : ' disconnected')
+      : 'no dispatcher';
     document.getElementById('total').textContent = bots.length;
     document.getElementById('active').textContent = bots.filter(b=>b.state==='working').length;
     document.getElementById('tok').textContent = k(bots.reduce((s,b)=>s+(b.tokensIn||0)+(b.tokensOut||0),0));
