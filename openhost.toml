@@ -1,0 +1,25 @@
+[app]
+name = "minecraft-agents"
+version = "0.1.0"
+description = "LLM-driven Mineflayer agents; one app configures any number of bots"
+
+[runtime.container]
+image = "Dockerfile"
+port = 8080
+
+[routing]
+health_check = "/health"
+
+# The Anthropic API key is pulled from the OpenHost secrets service at boot.
+[[services.v2.consumes]]
+service = "github.com/imbue-openhost/openhost/services/secrets"
+shortname = "secrets"
+version = ">=0.1.0"
+grants = [{ key = "ANTHROPIC_API_KEY" }]
+
+[resources]
+memory_mb = 512
+cpu_millicores = 500
+
+[data]
+# app_data = true

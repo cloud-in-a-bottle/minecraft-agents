@@ -1,0 +1,157 @@
+# minecraft-agents
+
+The bot-side component: one OpenHost app running a persistent **dispatcher**
+player that players tag in-game to summon LLM-controlled Mineflayer **worker**
+bots on a Minecraft Java server. Each worker connects as a normal client,
+pursues one natural-language goal via a Claude planning loop over a fixed skill
+library, then **logs out when the task finishes**.
+
+Architecture follows the Voyager/Mindcraft pattern (see `RESEARCH.md`): the LLM
+plans at the **skill level, not motor commands**; a deterministic Mineflayer layer
+executes; fresh perception is fed back every step.
+
+## Topology
+
+```
+                          +--> worker agent_1 (task -> logout)
+[ this app ]              |--> worker agent_2 (task -> logout)
+  dispatcher "agents" ----+--> worker agent_3 ...
+        |                       (each: Minecraft protocol --> Java server)
+        +-- @agents chat commands in-game
+        +-- HTTP control API (OpenHost, owner-gated)
+        +-- Anthropic API (planner, per worker)
+```
+
+The dispatcher stays online and non-interactable; workers are ephemeral —
+summoned for a goal, gone when done, reusable by number. All connect **out** to
+the server (offline backend behind a Velocity proxy, or any reachable host).
+
+## Configuration (env vars)
+
+One process, one config → the whole roster. Set these on the OpenHost app.
+
+| Var | Default | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | — | Planner key. **Local dev only** — in production it's pulled from the OpenHost **secrets** service at boot (grant the `ANTHROPIC_API_KEY` secret); see `openhost.toml`. |
+| `MC_HOST` | `localhost` | Server host — **also editable live in the dashboard** |
+| `MC_PORT` | `25565` | Server port — **also editable live in the dashboard** |
+| `MC_VERSION` | auto | Pin if auto-detect fails |
+| `MC_AUTH` | `offline` | `offline` or `microsoft` |
+| `LOGIN_MESSAGE` | — | Chat sent on spawn (e.g. `/login <pw>` for an offline server) — **also editable live in the dashboard** |
+| `DISPATCHER_NAME` | `agents` | Username of the always-on dispatcher players tag |
+| `BOT_COUNT` | `0` | Optional pre-spawned workers `agent_1`..`agent_N` (usually 0 — summon on demand) |
+| `BOTS_CONFIG` | — | Path to a JSON array of `{goal?, model?}` for pre-spawned workers; numbered `agent_1`.. by array order |
+| `LLM_MODEL` | `claude-haiku-4-5` | Planner model — only `claude-haiku-4-5` (`haiku`) or `claude-sonnet-5` (`sonnet`); thinking is always off |
+| `LLM_EFFORT` | `low` | `low`..`max` (Sonnet only; ignored by Haiku) |
+| `LLM_MAX_STEPS` | `40` | Skill calls per goal before the loop stops |
+| `COMMAND_ALLOWLIST` | — | Comma-separated usernames allowed to command `@<dispatcher>`; empty = anyone |
+| `MAX_BOTS` | `20` | Cap on concurrent **online** workers (logged-out ones don't count) |
+| `MAX_PER_USER` | `5` | Cap on online workers one player may own (0 = unlimited). Live-editable in the dashboard |
+| `PORT` | `8080` | HTTP port (matches `openhost.toml`) |
+
+Workers are normally summoned in-game (below), so `BOT_COUNT` defaults to `0` —
+only the dispatcher runs at boot. Pre-spawning via `BOT_COUNT`/`BOTS_CONFIG` is
+optional; those workers have no owner and so aren't reusable through `@agents`.
+
+## Control API
+
+All routes are login-gated by the OpenHost router (nothing is public).
+
+| Method | Path | Body | Action |
+|---|---|---|---|
+| GET | `/health` | — | Liveness |
+| GET | `/dispatcher` | — | Dispatcher name, online state, recent log |
+| GET | `/bots` | — | Status of every worker (incl. logged-out) |
+| GET | `/bots/:name` | — | One worker's status + recent log |
+| POST | `/summon` | `{"count":N,"goal":"..."}` | Summon N fresh workers on one goal → `{spawned:[...],rejected}` |
+| POST | `/bots/:name/goal` | `{"goal":"..."}` | Retask a worker (admin; reconnects if logged out); **409** if busy |
+| POST | `/bots/:name/chat` | `{"message":"..."}` | Say something in-game |
+| POST | `/bots/:name/stop` | — | Disconnect a worker |
+
+The HTTP channel is admin (owner-gated by the OpenHost router) and bypasses the
+in-game ownership check.
+
+`GET /` serves a **live dashboard** — a scrolling, auto-refreshing (1.5s) summary
+line per agent: state (active/idle/connecting/stopped, color-coded), owner, goal,
+step + conversation length, tokens in/out, cache-read tokens, **network in/out**,
+and health/food, with dispatcher status, fleet token + **traffic** totals in the
+header. Traffic = real Minecraft socket bytes (on-wire) per bot + approximate API
+request/response bytes; summed across all workers and the dispatcher. The header
+also has **live-editable controls** — the Minecraft server host/port, the login
+message (e.g. `/login <pw>`), and the per-user cap — applied via `POST /config`
+with no restart (host/login changes reconnect the fleet). The **per-user cap is
+editable inline** (header input → `POST /config`); it takes effect on the next
+summon with no restart and without disconnecting any running agent. Enforced for
+in-game players (owner `api`/HTTP admin is exempt); over-cap `new` requests are
+truncated and the dispatcher says so in chat.
+
+## In-game chat commands
+
+Management runs through the **dispatcher** (`@agents`); the owner steers a running
+worker with `@agent_N` / `/msg`. Full grammar, ownership rules, responses, and the
+HTTP equivalents are in **[COMMANDS.md](COMMANDS.md)**.
+
+```
+@agents new 3 mine iron ore          # create 3 workers
+@agents 1 2 build a wall            # task workers you own
+@agent_1 focus on oak                # steer a running worker (owner only)
+```
+
+## Skills the planner can call
+
+The worker's action space — perceive, move/mine/build, logistics, combat,
+background behaviors, talk — is documented in **[TOOLS.md](TOOLS.md)**.
+Navigation uses `mineflayer-pathfinder` (A\*); every action is time-boxed and a
+perception snapshot is injected each step.
+
+## Deploy
+
+```bash
+oh app deploy https://github.com/<you>/minecraft-agents --name minecraft-agents --wait
+oh app logs minecraft-agents
+```
+
+Then:
+1. Store the planner key in the OpenHost **secrets** service under `ANTHROPIC_API_KEY`
+   and approve this app's grant for it (the app fetches it at boot).
+2. Open the app dashboard (`GET /`) and set the **server host/port** and **login
+   message** (e.g. `/login <pw>`) — live, no restart.
+
+Summon workers (or just tag `@agents` in-game):
+
+```bash
+oh curl -X POST https://minecraft-agents.<zone>/summon \
+  -H 'content-type: application/json' -d '{"count":3,"goal":"collect 5 oak_log"}'
+```
+
+## Scaling
+
+Per-worker cost is dominated by (a) Claude calls and (b) the server-side chunks
+each bot keeps loaded — not the bot process (see `RESEARCH.md` for measured
+figures, ~100 MB/online worker). `MAX_BOTS` caps concurrent *online* workers;
+raise `memory_mb`/`cpu_millicores` in `openhost.toml` alongside it. Workers
+logging out on task completion naturally frees memory and capacity. For many bots
+on one IP, raise the server's per-IP registration limit if using `BOT_PASSWORD`.
+
+## Local dev
+
+```bash
+npm install
+npm run build
+ANTHROPIC_API_KEY=sk-... MC_HOST=localhost npm start   # dispatcher only; summon via HTTP or @agents
+```
+
+## Notes
+
+- TypeScript (strict) because Mineflayer is Node-native; the CommonJS game
+  libraries are loaded via `createRequire` to avoid ESM named-export pitfalls.
+- Server connection is outbound and offline-mode-friendly; see `RESEARCH.md`
+  for the auth/proxy trade-offs.
+- `LLM_EFFORT` is sent as `output_config.effort`, which Haiku rejects. The planner
+  detects that 400 once, drops the field (and `thinking`), and continues.
+- Cost efficiency: the tools+system prefix is prompt-cached (a stable ~4k-token
+  prefix → ~0.1× on cache reads; engages on Sonnet now, on Haiku once the tool set
+  clears its 4096-token minimum). History is compacted **deterministically** — old
+  tool results collapse to per-tool summaries (`summarizeResult`) and only the
+  latest step keeps full output + fresh perception; durable state rides in the
+  ledger/waypoints, not the transcript. No model calls are used to compact.
