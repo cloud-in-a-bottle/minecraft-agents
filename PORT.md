@@ -165,7 +165,7 @@ Assignments (each writes only its file(s); all depend on mc.rs + skills/mod.rs +
 | L4-surv | `skills/survival.rs` | skills_survival.ts (dig_down_safe + 4 behaviors) |
 | L4-multi | `skills/multiagent.rs`, `skills/presence.rs`, `skills/messaging.rs`, `skills/rules.rs` | the small skill modules |
 | L4-agent | `agent.rs` | agent.ts — worker lifecycle + planning loop; builds PlanRequest, self-heals 400 by clearing effort then thinking, KEEP_FULL=4 history compaction, token + byte accounting (bytes = serialized request/response len + azalea socket bytes), impls `BotView`, builds the `Exec` closure wrapping `base::execute` |
-| L4-disp | `dispatcher.rs` | dispatcher.ts — command bot, `@agents`/whisper grammar, teleport, recycle |
+| L4-disp | `dispatcher.rs` | dispatcher.ts — command bot, `@agents`/whisper grammar, teleport |
 | L4-mgr | `manager.rs` | manager.ts — fleet map, ownership, the manager facade in this doc, `PeerApi` impl, settings load/apply |
 
 Sequencing: run L4-core alone first (or first in a wave). Once `mc.rs`/`base.rs` land, fan out the rest together.

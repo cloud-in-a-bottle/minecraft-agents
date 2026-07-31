@@ -27,9 +27,21 @@ use crate::mc::{
 use crate::skills::{base, McData, SelfInfo, SkillContext};
 use crate::types::{AgentState, AgentStatus, AuthMode, BotSpec, Effort, LlmConfig, McConfig, Pos};
 
-const SYSTEM: &str = r#"You control a single Minecraft bot through a fixed set of skills (tools).
+const SYSTEM: &str = r#"You control a single Minecraft bot through a fixed set of skills (tools). As you work you also BUILD and REUSE a shared library of ROUTINES (saved multi-step procedures) and SETTINGS (reactive rules). That library is shared across every agent and owner, so it compounds — each routine you leave behind makes the whole fleet more capable.
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
-Rules:
+
+ROUTINE-FIRST — THIS IS YOUR CORE OPERATING MODE, NOT AN OPTIMIZATION.
+Finishing the goal is only half your job; leaving behind a reusable routine that does it is the other half. So for EVERY goal your FIRST action is list_routines, then:
+  1) a matching routine exists -> run_routine it (fill its {params}); the whole job then runs deterministically with ZERO further LLM calls — far faster and cheaper.
+  2) a close one exists -> extend it and save_routine, then run_routine. Prefer extending over creating a near-duplicate.
+  3) none fits -> author one with save_routine that covers the job end-to-end, then run_routine — do this even for a seemingly one-off task; authoring costs a single step and is exactly what players want left behind.
+Improvising raw, one-skill-at-a-time calls is the EXCEPTION, allowed only when a task genuinely cannot be expressed as steps yet: live navigation to a brand-new spot, scouting/exploration, reacting to owner/teammate messages or damage, or a truly novel situation. Even then, the moment you have done something by hand ONCE, capture it as a routine before repeating it — if you are about to make your second manual tool call of the same kind, STOP and write a routine instead.
+
+Authoring routines: parameterize everything variable with {param} placeholders (block, count, direction, coordinates); give a clear name + description (that is how players and other agents find and rerun it); cover the whole job end-to-end in ONE routine (locate -> gather -> craft -> deposit); make it robust with until/when/repeat loops and stop_on_error (grammar is in save_routine).
+
+Settings (reactive rules): the moment you notice a condition that should trigger an action on its own — low food/health, an item running low, arriving somewhere — create it ONCE with create_setting (e.g. food<14 -> collect and eat food). It then runs by itself, for every agent, until deleted. Reach for a setting instead of babysitting a condition by hand.
+
+Tactics:
 - Decompose the goal into short, concrete steps. Long-horizon plans fail; act, observe, adjust.
 - Before each tool call, output one short sentence saying what you're doing and why.
 - Never invent coordinates — use find_blocks to locate things before moving or mining.
@@ -39,10 +51,7 @@ Rules:
 - go_to and collect_block only path reliably within ~32 blocks. For anything farther, close the gap in stages with go_toward (a cardinal direction or a block type), then act.
 - If a skill returns an error, try a different concrete approach rather than repeating it.
 - You can only talk to your owner and to fellow agents owned by them: use "message" to reach one, "message_team" to reach all your teammates. There is no public chat.
-- Owner messages appear as OWNER:, teammate messages as AGENT <name>:, and damage as a "took N damage" note — respond to these.
-- Routines are how your work gets reused — players mostly want a saved, replayable procedure, not a one-off. Whenever a goal is repeatable, author one instead of doing ad-hoc steps.
-- To build one: check list_routines first (the library is shared across all agents and owners — reuse or extend an existing routine), otherwise save_routine then run_routine. Parameterize everything variable with {param} placeholders (block, count, direction, coordinates) and give it a clear name + description — that is how players find and rerun it. Cover the whole job in one routine (locate, gather, craft, deposit), and make it robust with until/when/repeat loops and stop_on_error (grammar is in save_routine).
-- To react automatically to conditions (low food/health, etc.), create a setting once with create_setting (e.g. food<14 -> collect and eat food); it runs on its own until you delete it.
+- Owner messages appear as OWNER:, teammate messages as AGENT <name>:, and damage as a "took N damage" note — respond to these. Server/system events (deaths, kills, joins, broadcasts) appear as SERVER: — use them for situational awareness (react only if relevant to your goal or safety).
 - Call task_complete as soon as the goal is met or is clearly impossible."#;
 
 const KEEP_FULL: usize = 4; // recent steps keep full results; older collapse to summaries
@@ -417,7 +426,12 @@ fn make_ctx(s: &Arc<AgentShared>, bot: Client) -> SkillContext {
         self_: SelfInfo { username: s.spec.username.clone(), owner: s.owner() },
         behaviors: s.behaviors.clone(),
         note: s.note_fn(),
-        wake: { let s = s.clone(); Arc::new(move || !s.injected.lock().is_empty()) },
+        // Wake (routine interrupt) on urgent injects — owner/teammate/damage — but NOT on SERVER:
+        // broadcasts, which are delivered on the next planner turn without aborting a routine.
+        wake: {
+            let s = s.clone();
+            Arc::new(move || s.injected.lock().iter().any(|m| !m.starts_with("SERVER:")))
+        },
     }
 }
 
@@ -578,6 +592,9 @@ async fn handle(bot: Client, event: Event, state: WorkerState) -> anyhow::Result
                 } else {
                     on_owner_chat(shared, &user, content.trim());
                 }
+            } else if !s.is_empty() {
+                // System/server message (deaths, kills, joins, broadcasts): deliver to the planner.
+                inject_server(shared, s);
             }
         }
         // Poll for a health drop each tick (mineflayer's "health" event has no azalea analog).
@@ -653,6 +670,20 @@ fn hostile_name(bot: &Client, entity: azalea::ecs::entity::Entity) -> String {
     let kind: EntityKind = *comp;
     let s = kind.to_string();
     s.strip_prefix("minecraft:").unwrap_or(&s).to_string()
+}
+
+/// Deliver a server/system message (deaths, kills, joins, broadcasts) to the planner. Non-urgent:
+/// it does not wake a running routine (see the wake predicate), and the pending count is capped.
+fn inject_server(shared: &Arc<AgentShared>, msg: &str) {
+    let trunc: String = msg.chars().take(180).collect();
+    let mut q = shared.injected.lock();
+    // Cap pending SERVER lines so a chatty server can't balloon the next request; drop the oldest.
+    if q.iter().filter(|m| m.starts_with("SERVER:")).count() >= 15 {
+        if let Some(pos) = q.iter().position(|m| m.starts_with("SERVER:")) {
+            q.remove(pos);
+        }
+    }
+    q.push(format!("SERVER: {trunc}"));
 }
 
 /// Owner-only in-game prompt: `@agent_N <msg>` while it's online.

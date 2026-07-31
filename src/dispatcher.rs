@@ -82,7 +82,6 @@ struct DispShared {
     auth: Mutex<Option<Auth>>,
     afk: Mutex<Option<JoinHandle<()>>>,
     prune: Mutex<Option<JoinHandle<()>>>,
-    recycle: Mutex<Option<JoinHandle<()>>>,
     reconnector: Reconnector,
     stopped: AtomicBool,
     online: AtomicBool,
@@ -140,7 +139,6 @@ impl Dispatcher {
                 auth: Mutex::new(None),
                 afk: Mutex::new(None),
                 prune: Mutex::new(None),
-                recycle: Mutex::new(None),
                 reconnector: Reconnector::new(8, on_reconnect, on_give_up),
                 stopped: AtomicBool::new(false),
                 online: AtomicBool::new(false),
@@ -167,9 +165,6 @@ impl Dispatcher {
     pub fn stop(&self) {
         self.shared.stopped.store(true, Ordering::Relaxed);
         self.shared.reconnector.reset();
-        if let Some(h) = self.shared.recycle.lock().take() {
-            h.abort();
-        }
         if let Some(bot) = self.shared.bot.lock().take() {
             bot.disconnect();
         }
@@ -179,26 +174,6 @@ impl Dispatcher {
     pub fn reconnect(&self) {
         self.shared.reconnector.reset();
         connect(&self.shared);
-    }
-
-    /// Periodically reconnect to reset the always-on bot's accumulated chunk memory (0 disables).
-    pub fn enable_recycle(&self, interval_ms: u64) {
-        if interval_ms == 0 || self.shared.recycle.lock().is_some() {
-            return;
-        }
-        let shared = self.shared.clone();
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
-                if shared.stopped.load(Ordering::Relaxed) || !shared.online.load(Ordering::Relaxed) {
-                    continue;
-                }
-                shared.note("scheduled recycle (reset chunk memory)");
-                shared.reconnector.reset();
-                connect(&shared);
-            }
-        });
-        *self.shared.recycle.lock() = Some(handle);
     }
 
     pub fn status(&self) -> DispatcherStatus {

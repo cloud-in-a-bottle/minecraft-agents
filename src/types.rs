@@ -77,7 +77,6 @@ pub struct AppConfig {
     pub command_allowlist: Vec<String>,
     pub max_bots: usize,
     pub max_per_user: usize,
-    pub dispatcher_recycle_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

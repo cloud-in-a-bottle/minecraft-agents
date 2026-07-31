@@ -120,6 +120,5 @@ pub fn load_config() -> Result<AppConfig> {
         command_allowlist,
         max_bots: env("MAX_BOTS", Some("20"))?.parse()?,
         max_per_user: env("MAX_PER_USER", Some("5"))?.parse()?,
-        dispatcher_recycle_ms: env("DISPATCHER_RECYCLE_MIN", Some("45"))?.parse::<u64>()? * 60_000,
     })
 }

@@ -315,6 +315,11 @@ async fn run(ctx: &SkillContext, name: &str, input: &Value) -> anyhow::Result<St
             None => "position unknown".to_string(),
         },
 
+        "whoami" => {
+            let owner = ctx.self_.owner.as_deref().unwrap_or("nobody (you are unowned)");
+            format!("you are {}, owner: {owner}", ctx.self_.username)
+        }
+
         "go_to" => {
             let (x, y, z) = (gi(input, "x"), gi(input, "y"), gi(input, "z"));
             let goal = RadiusGoal::new(Vec3::new(x as f64, y as f64, z as f64), 1.0);
@@ -989,6 +994,7 @@ pub fn base_tools() -> Vec<ToolDef> {
         tool("find_blocks", "Locate the nearest blocks of a type (e.g. oak_log, stone, iron_ore). Returns each as a signed offset from you (+x east, +y up, +z south) with distance, e.g. \"+5 -2 +3 (6m)\". Add an offset to your position (get_position) to get an absolute coordinate for go_to/mine_block.",
             schema(json!({ "name": { "type": "string" }, "count": { "type": "integer" }, "max_distance": { "type": "integer" } }), &["name", "count", "max_distance"])),
         tool("get_position", "Read your current absolute world coordinates (x, y, z). find_blocks and similar report locations as offsets from you; add them to this for absolute coordinates.", schema(json!({}), &[])),
+        tool("whoami", "Report your own bot username and your owner's name — the owner is who you answer to and the one you can `message`. Returns \"unowned\" if you have no owner.", schema(json!({}), &[])),
         tool("go_to", "Walk to a coordinate.", schema(json!({ "x": { "type": "integer" }, "y": { "type": "integer" }, "z": { "type": "integer" } }), &["x", "y", "z"])),
         tool("go_to_player", "Walk to within 2 blocks of a named player.", schema(json!({ "username": { "type": "string" } }), &["username"])),
         tool("go_toward", "Travel up to <distance> blocks toward a heading: a cardinal direction (north/south/east/west) or the nearest block of a named type (e.g. oak_log). Best-effort relocation when go_to/collect_block can't path to an exact spot; reports where you end up.", schema(json!({ "target": { "type": "string" }, "distance": { "type": "integer" } }), &["target", "distance"])),

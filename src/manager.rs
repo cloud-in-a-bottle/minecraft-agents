@@ -55,7 +55,6 @@ struct Fleet {
 /// (env.peers / dispatcher handlers point back here) that lives for the process.
 struct Inner {
     max_bots: usize,
-    dispatcher_recycle_ms: u64,
     bots: Vec<BotSpec>,
     // live, shared by reference with every worker so settings edits reach them on reconnect.
     mc: Arc<Mutex<McConfig>>,
@@ -434,7 +433,6 @@ impl BotManager {
         let rules = Arc::new(FileRuleStore::new(lib.join("settings")));
         let inner = Arc::new(Inner {
             max_bots: config.max_bots,
-            dispatcher_recycle_ms: config.dispatcher_recycle_ms,
             bots: config.bots.clone(),
             mc: Arc::new(Mutex::new(config.mc.clone())),
             llm: Arc::new(Mutex::new(config.llm.clone())),
@@ -470,7 +468,6 @@ impl BotManager {
     pub fn start_all(&self) {
         let inner = &self.inner;
         inner.dispatcher().start();
-        inner.dispatcher().enable_recycle(inner.dispatcher_recycle_ms);
         let agents: Vec<Arc<Agent>> = inner.state.lock().agents.values().cloned().collect();
         for a in agents {
             a.start();
