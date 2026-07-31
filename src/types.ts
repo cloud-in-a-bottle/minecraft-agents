@@ -70,7 +70,7 @@ export interface CreateResult {
   reason?: "at_capacity" | "user_limit";
 }
 
-/** Result of a per-agent batch op (task/release/claim/give). */
+/** Result of a per-agent batch op (task/free/claim/quit/give). */
 export interface BatchResult {
   done: string[];
   skipped: { name: string; reason: string }[];

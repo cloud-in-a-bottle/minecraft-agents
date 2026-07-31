@@ -7,10 +7,25 @@ export const mineflayer = require("mineflayer");
 export const { pathfinder, Movements, goals } = require("mineflayer-pathfinder");
 export const collectBlock = require("mineflayer-collectblock").plugin;
 export const pvp = require("mineflayer-pvp").plugin;
+export const tool = require("mineflayer-tool").plugin;
 export const { Vec3 } = require("vec3");
 export const mcDataLoader = require("minecraft-data");
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Equip the fastest tool for a block (mineflayer-tool). With requireHarvest, only a
+ * tool that actually yields drops is equipped; returns false if the bot carries none.
+ */
+export async function equipBestTool(bot: any, block: any, requireHarvest = false): Promise<boolean> {
+  if (!block || !bot.tool?.equipForBlock) return true; // no plugin: dig with whatever's in hand
+  try {
+    await bot.tool.equipForBlock(block, { requireHarvest });
+    return true;
+  } catch {
+    return false; // requireHarvest and nothing carried can harvest it
+  }
+}
 
 /** Reject a promise if it doesn't settle in time — every world action is time-boxed. */
 export function withTimeout<T>(p: Promise<T>, ms: number, label = "action"): Promise<T> {

@@ -1,5 +1,5 @@
 import { obj, type Skill, type SkillContext } from "./skillkit.js";
-import { Vec3, goals, sleep } from "./deps.js";
+import { Vec3, equipBestTool, goals, sleep } from "./deps.js";
 
 /** Consumed ingredients of a recipe as id→count, from delta/ingredients/inShape. */
 function recipeIngredients(recipe: any): Map<number, number> {
@@ -68,6 +68,7 @@ async function digSafe(bot: any, pos: any): Promise<boolean> {
   if (!b || b.name === "air") return false;
   if (b.name.includes("lava")) throw new Error(`lava at (${pos.x}, ${pos.y}, ${pos.z})`);
   if (!bot.canDigBlock(b)) return false;
+  await equipBestTool(bot, b);
   await bot.dig(b);
   return true;
 }

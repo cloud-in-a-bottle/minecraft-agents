@@ -3,16 +3,29 @@ import type { Bot } from "mineflayer";
 import type { Vec3 as Vec3T } from "vec3";
 import { obj, SHARED_SCOPE, type SkillContext } from "./skillkit.js";
 import { ALL_BEHAVIORS, ALL_SKILLS } from "./registry.js";
-import { Vec3, goals, nearestHostile, sleep, withTimeout } from "./deps.js";
+import { Vec3, equipBestTool, goals, nearestHostile, sleep, withTimeout } from "./deps.js";
 import { RoutineError, referencedTools, runSteps, type RunCtx } from "./routines.js";
 import { RuleEngine } from "./rules.js";
+
+const COMPASS8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+/** 8-point compass bearing + horizontal distance from `from` to `to` (MC axes: north=-z, east=+x). */
+function bearing(from: Vec3T, to: Vec3T): string {
+  const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+  const dir = COMPASS8[(Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) % 8 + 8) % 8];
+  const vert = Math.abs(dy) >= 4 ? (dy > 0 ? " above" : " below") : "";
+  return `${dir} ${Math.round(Math.hypot(dx, dz))}m${vert}`;
+}
 
 /** Compact perception snapshot fed to the planner every step. */
 export function observe(bot: Bot): string {
   const p = bot.entity?.position;
   const pos = p ? `(${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)})` : "unknown";
   const inv = bot.inventory.items().map((i) => `${i.name}x${i.count}`).join(", ") || "empty";
-  const players = Object.keys(bot.players).filter((n) => n !== bot.username).join(", ") || "none";
+  const players = Object.keys(bot.players)
+    .filter((n) => n !== bot.username)
+    .map((n) => { const e = bot.players[n]?.entity; return e && p ? `${n} (${bearing(p, e.position)})` : n; })
+    .join(", ") || "none";
   const mobs = p
     ? Object.values(bot.entities)
         .filter((e) => e.type === "mob" && e.position.distanceTo(p) < 16)
@@ -199,6 +212,8 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
           if (!block || block.name === "air") return "no block at that coordinate";
         }
         if (!inReach()) return `can't reach the block at (${input.x}, ${input.y}, ${input.z}) — path blocked; clear a way or mine from an adjacent spot`;
+        if (!(await equipBestTool(bot, block, true)))
+          return `can't harvest ${block.name} — no tool you carry would drop it; craft/equip a stronger tool (see get_block_info)`;
         await withTimeout(bot.dig(block), 60_000, "mine_block");
         return `mined ${block.name}`;
       }

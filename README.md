@@ -101,13 +101,17 @@ truncated and the dispatcher says so in chat.
 
 ## In-game chat commands
 
-Management runs through the **dispatcher** (`@agents`); the owner steers a running
-worker with `@agent_N` / `/msg`. Full grammar, ownership rules, responses, and the
-HTTP equivalents are in **[COMMANDS.md](COMMANDS.md)**.
+Management runs through the **dispatcher** (`@agents`), commanded publicly with
+`@agents <cmd>` or privately with `/msg agents <cmd>`; it replies **privately**
+either way. The owner steers a running worker with `@agent_N` / `/msg`. The
+dispatcher holds **op** and teleports each freshly summoned worker to its owner on
+login. Full grammar, ownership rules, responses, and the HTTP equivalents are in
+**[COMMANDS.md](COMMANDS.md)**.
 
 ```
-@agents new 3 mine iron ore          # create 3 workers
+@agents new 3 mine iron ore          # create 3 workers (shorthand: @a n 3 …)
 @agents 1 2 build a wall            # task workers you own
+@agents quit 1                       # disconnect agent_1 now
 @agent_1 focus on oak                # steer a running worker (owner only)
 ```
 
@@ -165,7 +169,7 @@ State lives in a SQLite DB (`node:sqlite`, no native build) on the OpenHost
 
 - **Dashboard settings** — server host/port, login message, per-user cap, planner
   model, step budget. Override the env seed at boot, so dashboard edits survive a restart/redeploy.
-- **Ownership** — each `agent_N`'s owner, so owned/reserved numbers persist across
+- **Ownership** — each `agent_N`'s owner, so owned numbers persist across
   restarts (offline placeholders are recreated at boot).
 - **Memory** — per-owner waypoints, notes, and the task ledger.
 

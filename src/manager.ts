@@ -44,8 +44,9 @@ export class BotManager {
     this.dispatcher = new Dispatcher(config.dispatcherName, config.mc, config.commandAllowlist, {
       createNew: (count, goal, owner) => this.createNew(count, goal, owner),
       assignExisting: (nums, goal, owner) => this.assignExisting(nums, goal, owner),
-      release: (nums, owner) => this.release(nums, owner),
+      free: (nums, owner) => this.free(nums, owner),
       claim: (nums, owner) => this.claim(nums, owner),
+      quit: (nums, owner) => this.quit(nums, owner),
       give: (nums, owner, target) => this.give(nums, owner, target),
     });
     for (const spec of config.bots) this.create(spec, null);
@@ -81,7 +82,9 @@ export class BotManager {
   }
 
   private create(spec: BotSpec, owner: string | null): Agent {
-    const agent = new Agent(spec, this.config.mc, this.config.llm, owner, this.env, this.keys);
+    const agent = new Agent(spec, this.config.mc, this.config.llm, owner, this.env, this.keys, (name, target) =>
+      this.dispatcher.teleport(name, target),
+    );
     this.agents.set(spec.username, agent);
     return agent;
   }
@@ -194,8 +197,8 @@ export class BotManager {
     return { done, skipped };
   }
 
-  /** `release x[, y]` — the owner relinquishes ownership (becomes claimable). */
-  release(numbers: number[], owner: string): BatchResult {
+  /** `free x[, y]` — the owner relinquishes ownership (becomes claimable). */
+  free(numbers: number[], owner: string): BatchResult {
     const done: string[] = [];
     const skipped: BatchResult["skipped"] = [];
     for (const name of numbers.map((n) => `agent_${n}`)) {
@@ -226,6 +229,22 @@ export class BotManager {
         this.setOwner(a, name, owner);
         done.push(name);
       } else skipped.push({ name, reason: "owned_by_other" });
+    }
+    return { done, skipped };
+  }
+
+  /** `quit x[, y]` — immediately disconnect workers the caller owns, even mid-task. */
+  quit(numbers: number[], owner: string): BatchResult {
+    const done: string[] = [];
+    const skipped: BatchResult["skipped"] = [];
+    for (const name of numbers.map((n) => `agent_${n}`)) {
+      const a = this.agents.get(name);
+      if (!a) skipped.push({ name, reason: "unknown" });
+      else if (a.owner !== owner) skipped.push({ name, reason: "not_owner" });
+      else {
+        a.stop();
+        done.push(name);
+      }
     }
     return { done, skipped };
   }

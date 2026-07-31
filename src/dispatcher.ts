@@ -5,8 +5,9 @@ import { Reconnector, antiAfk, installAuth, kickReason, logLine, logServerMessag
 export interface DispatchHandlers {
   createNew: (count: number, goal: string, owner: string) => CreateResult;
   assignExisting: (numbers: number[], goal: string, owner: string) => BatchResult;
-  release: (numbers: number[], owner: string) => BatchResult;
+  free: (numbers: number[], owner: string) => BatchResult;
   claim: (numbers: number[], owner: string) => BatchResult;
+  quit: (numbers: number[], owner: string) => BatchResult;
   give: (numbers: number[], owner: string, target: string) => BatchResult;
 }
 
@@ -83,6 +84,7 @@ export class Dispatcher {
     logServerMessages(bot, (m) => this.note(m));
     installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onChat(username, message));
+    bot.on("whisper", (username, message) => this.onWhisper(username, message));
     bot.on("kicked", (reason) => this.note(`kicked: ${kickReason(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
@@ -96,29 +98,49 @@ export class Dispatcher {
     if (old) safeQuit(old); // its "end" is ignored (this.bot now points to the new one)
   }
 
+  /** All replies go back privately (never public chat), addressed by the /msg target alone. */
   private reply(username: string, msg: string): void {
-    this.bot?.chat(`${username} ${msg}`);
+    this.bot?.whisper(username, msg);
     this.note(`${username}: ${msg}`);
+  }
+
+  /** Op teleport (the dispatcher has op): bring a worker to a player. */
+  teleport(agent: string, target: string): void {
+    this.bot?.chat(`/tp ${agent} ${target}`);
+    this.note(`tp ${agent} -> ${target}`);
   }
 
   private skippedNote(r: BatchResult): string {
     return r.skipped.length ? ` (skipped ${r.skipped.map((s) => `${s.name}: ${s.reason}`).join(", ")})` : "";
   }
 
+  /** Public `@agents <cmd>` (or the `@a` first-letter shorthand) in chat. */
   private onChat(username: string, message: string): void {
     if (username === this.username) return;
-    const escaped = this.username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = message.trim().match(new RegExp(`^@${escaped}\\b[\\s:,-]*(.*)$`, "i"));
-    if (!match) return;
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const prefix = `${esc(this.username)}|${esc(this.username[0])}`; // full name or its first letter
+    const match = message.trim().match(new RegExp(`^@(?:${prefix})\\b[\\s:,-]*(.*)$`, "i"));
+    if (match) this.handleCommand(username, match[1].trim());
+  }
+
+  /** Private `/msg agents <cmd>` — same grammar, no `@agents` prefix needed. */
+  private onWhisper(username: string, message: string): void {
+    if (username === this.username) return;
+    this.handleCommand(username, message.trim());
+  }
+
+  private handleCommand(username: string, rest: string): void {
     if (this.allowlist.length && !this.allowlist.includes(username)) {
       this.reply(username, "not allowed to command bots");
       return;
     }
-    const rest = match[1].trim();
-    if (!rest) return this.reply(username, `usage: @${this.username} new [n] <task> | <n> [n…] <task> | release/claim/reserve <n> [n…] | give <n> [n…] <player>`);
+    if (!rest) return this.reply(username, `usage: new [n] <task> | <n> [n…] <task> | free/claim/quit <n> [n…] | give <n> [n…] <player>`);
 
-    const cmd = rest.match(/^(new|release|claim|reserve|give)\b\s*(.*)$/i);
-    const keyword = cmd?.[1].toLowerCase();
+    // Each keyword also accepts its first letter (n/f/c/q/g).
+    const cmd = rest.match(/^(new|n|free|f|claim|c|quit|q|give|g)\b\s*(.*)$/i);
+    const ALIASES: Record<string, string> = { n: "new", f: "free", c: "claim", q: "quit", g: "give" };
+    const raw = cmd?.[1].toLowerCase();
+    const keyword = raw ? ALIASES[raw] ?? raw : undefined;
     const args = cmd?.[2].trim() ?? "";
 
     if (keyword === "new") {
@@ -136,17 +158,19 @@ export class Dispatcher {
       );
     }
 
-    // reserve = claim: log the caller as owner of those numbers without connecting them yet.
-    if (keyword === "release" || keyword === "claim" || keyword === "reserve") {
+    if (keyword === "free" || keyword === "claim" || keyword === "quit") {
       const numbers = parseNumbers(args);
-      if (!numbers.length) return this.reply(username, `usage: @${this.username} ${keyword} <n> [n…]`);
-      if (keyword === "release") {
-        const r = this.handlers.release(numbers, username);
-        return this.reply(username, `released ${r.done.join(", ") || "nothing"}${this.skippedNote(r)}`);
+      if (!numbers.length) return this.reply(username, `usage: ${keyword} <n> [n…]`);
+      if (keyword === "free") {
+        const r = this.handlers.free(numbers, username);
+        return this.reply(username, `freed ${r.done.join(", ") || "nothing"}${this.skippedNote(r)}`);
+      }
+      if (keyword === "quit") {
+        const r = this.handlers.quit(numbers, username);
+        return this.reply(username, `quit ${r.done.join(", ") || "nothing"}${this.skippedNote(r)}`);
       }
       const r = this.handlers.claim(numbers, username);
-      const verb = keyword === "reserve" ? "reserved" : "claimed";
-      return this.reply(username, `${verb} ${r.done.join(", ") || "nothing"}${this.skippedNote(r)}`);
+      return this.reply(username, `claimed ${r.done.join(", ") || "nothing"}${this.skippedNote(r)}`);
     }
 
     if (keyword === "give") {

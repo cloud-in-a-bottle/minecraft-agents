@@ -4,13 +4,14 @@ import type { AgentState, AgentStatus, BotSpec, LlmConfig, McConfig } from "./ty
 import type { Pos, SkillContext, SkillEnv } from "./skillkit.js";
 import { type Planner, plannerFor } from "./llm.js";
 import { TOOLS, execute, installAutoBehaviors, observe, summarizeResult } from "./skills.js";
-import { Movements, Reconnector, collectBlock, installAuth, kickReason, logLine, logServerMessages, mcDataLoader, mineflayer, nearestHostile, pathfinder, pvp, safeQuit, socketBytes, startChunkPrune } from "./deps.js";
+import { Movements, Reconnector, collectBlock, installAuth, kickReason, logLine, logServerMessages, mcDataLoader, mineflayer, nearestHostile, pathfinder, pvp, safeQuit, socketBytes, startChunkPrune, tool } from "./deps.js";
 
 const SYSTEM = `You control a single Minecraft bot through a fixed set of skills (tools).
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
 Rules:
 - Decompose the goal into short, concrete steps. Long-horizon plans fail; act, observe, adjust.
 - Never invent coordinates — use find_blocks to locate things before moving or mining.
+- go_to and collect_block only path reliably within ~32 blocks. For anything farther, close the gap in stages with go_toward (a cardinal direction or a block type), then act.
 - If a skill returns an error, try a different concrete approach rather than repeating it.
 - You can only talk to your owner and to fellow agents owned by them: use "message" to reach one, "message_team" to reach all your teammates. There is no public chat.
 - Owner messages appear as OWNER:, teammate messages as AGENT <name>:, and damage as a "took N damage" note — respond to these.
@@ -40,6 +41,7 @@ export class Agent {
   private mcOutBase = 0;
   private stopped = false;
   private looping = false;
+  private teleportOnSpawn = false; // set on a fresh summon/task so the next spawn tp's to the owner
   private effortOk = true;
   private thinkingOk = true;
   private readonly injected: string[] = [];
@@ -65,8 +67,10 @@ export class Agent {
     public owner: string | null = null,
     private readonly env: SkillEnv,
     private readonly keys: { anthropic: string; openai: string }, // planner keys shared by the fleet
+    private readonly teleport: (agent: string, target: string) => void, // op-teleport via the dispatcher
   ) {
     this.goal = spec.goal ?? null;
+    this.teleportOnSpawn = !!this.goal;
     this.planner = plannerFor(spec.model ?? llm.model, keys);
   }
 
@@ -138,6 +142,7 @@ export class Agent {
     bot.loadPlugin(pathfinder);
     bot.loadPlugin(collectBlock);
     bot.loadPlugin(pvp);
+    bot.loadPlugin(tool); // auto best-tool selection for digging (collect_block + mine skills)
     this.bot = bot;
 
     bot.once("spawn", () => {
@@ -157,7 +162,13 @@ export class Agent {
       this.reconnector.markConnected();
       this.note(`spawned as ${this.spec.username}`);
       // Authenticate first, then act — starting the loop before login lands gets the bot kicked.
-      if (this.goal) setTimeout(() => void this.runLoop(), this.mc.loginMessage ? 3000 : 0);
+      const afterAuth = this.mc.loginMessage ? 3000 : 0;
+      // Freshly summoned/tasked: the dispatcher (op) brings it to its owner. Skipped on transient reconnects.
+      if (this.teleportOnSpawn && this.owner && this.owner !== "api") {
+        setTimeout(() => this.owner && this.teleport(this.spec.username, this.owner), afterAuth);
+      }
+      this.teleportOnSpawn = false;
+      if (this.goal) setTimeout(() => void this.runLoop(), afterAuth);
     });
     logServerMessages(bot, (m) => this.note(m));
     installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
@@ -222,6 +233,7 @@ export class Agent {
     if (this.state === "idle") void this.runLoop();
     else if (this.state === "stopped" || this.state === "error") {
       this.stopped = false;
+      this.teleportOnSpawn = true; // a logged-out worker coming back for a task tp's to its owner
       this.reconnector.reset();
       this.start();
     }

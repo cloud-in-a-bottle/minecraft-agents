@@ -44,10 +44,15 @@ aggregated in `src/registry.ts`.
 | `go_to_player` | `username` | Pathfind to within 2 blocks of a player |
 | `follow_player` | `username, seconds` (max 300) | Follow continuously, ~2 blocks away |
 | `collect_block` | `name, count` | Find + mine + pick up N of a block |
-| `mine_block` | `x, y, z` | Dig the block at an exact coordinate |
-| `place_block` | `name, x, y, z` | Place a carried block (needs a solid block below) |
+| `mine_block` | `x, y, z` | Path into reach, then dig the block at an exact coordinate |
+| `place_block` | `name, x, y, z` | Path into reach, then place a carried block (needs a solid block below) |
 | `craft_item` | `name, count` | Craft, using a nearby crafting table if required |
 | `equip_item` | `name, destination` | Equip to `hand`/`head`/`torso`/`legs`/`feet`/`off-hand` |
+
+Every digging skill (`collect_block`, `mine_block`, `strip_mine`, `dig_staircase`,
+`dig_down_safe`) **auto-equips the fastest suitable tool** for each block via
+`mineflayer-tool` (e.g. an axe for wood, the right pickaxe for stone/ore). Use
+`equip_item` only for manual control — armor, weapons, or a specific held item.
 
 ## Tech tree · mining
 

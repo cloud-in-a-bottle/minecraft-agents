@@ -1,5 +1,5 @@
 import { obj, type BehaviorHandler, type Skill, type SkillContext } from "./skillkit.js";
-import { Vec3, goals, nearestHostile, sleep } from "./deps.js";
+import { Vec3, equipBestTool, goals, nearestHostile, sleep } from "./deps.js";
 
 const isHazardName = (n: string | undefined): boolean =>
   !n || n === "air" || n === "cave_air" || n === "void_air" || /lava|water/.test(n);
@@ -35,6 +35,7 @@ export const skills: Skill[] = [
         const target = bot.blockAt(pos.offset(0, -1, 0));
         if (target && target.name !== "air") {
           try {
+            await equipBestTool(bot, target);
             await bot.dig(target);
           } catch (err) {
             return `stopped after ${descended} blocks: dig failed (${(err as Error).message})`;
