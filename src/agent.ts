@@ -124,7 +124,7 @@ export class Agent {
       this.note(`spawned as ${this.spec.username}`);
       // Authenticate first, then act — starting the loop before login lands gets the bot kicked.
       if (this.mc.loginMessage) {
-        sendLogin(bot, this.mc.loginMessage);
+        sendLogin(bot, this.mc.loginMessage, (m) => this.note(m));
         if (this.goal) setTimeout(() => void this.runLoop(), 2500);
       } else if (this.goal) void this.runLoop();
     });

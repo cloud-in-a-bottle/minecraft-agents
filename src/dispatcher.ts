@@ -72,7 +72,7 @@ export class Dispatcher {
       this.reconnector.markConnected();
       this.note("dispatcher online");
       // Authenticate first; the spectator command is a no-op without permission.
-      if (this.mc.loginMessage) sendLogin(bot, this.mc.loginMessage);
+      sendLogin(bot, this.mc.loginMessage, (m) => this.note(m));
       setTimeout(() => bot.chat("/gamemode spectator"), 3000);
     });
     logServerMessages(bot, (m) => this.note(m));

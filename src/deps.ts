@@ -55,9 +55,15 @@ export function safeQuit(bot: any): void {
  * Send the configured login message(s) shortly after spawn (e.g. "/login <pw>").
  * Newline-separated lines are sent in order (e.g. "/register <pw> <pw>\n/login <pw>").
  */
-export function sendLogin(bot: Bot, message: string): void {
+export function sendLogin(bot: Bot, message: string, note?: (m: string) => void): void {
   const lines = message.split("\n").map((s) => s.trim()).filter(Boolean);
-  lines.forEach((line, i) => setTimeout(() => bot.chat(line), 1000 + i * 700));
+  if (!lines.length) { note?.("no login message configured"); return; }
+  lines.forEach((line, i) =>
+    setTimeout(() => {
+      try { bot.chat(line); note?.(`sent login: ${line}`); }
+      catch (e) { note?.(`login send failed: ${(e as Error).message}`); }
+    }, 1000 + i * 700),
+  );
 }
 
 /** Mirror server/system chat into a log so auth prompts and rejections are visible. */

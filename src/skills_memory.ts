@@ -98,10 +98,7 @@ export const skills: Skill[] = [
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
       const status = input.status as "todo" | "doing" | "done";
-      const ledger = ctx.memory.ledger(scopeOf(ctx));
-      const existing = ledger.find((i) => i.text === String(input.item));
-      if (existing) existing.status = status;
-      else ledger.push({ text: String(input.item), status });
+      const ledger = ctx.memory.setLedgerItem(scopeOf(ctx), String(input.item), status);
       return ledger.map((i) => `[${i.status}] ${i.text}`).join("; ") || "ledger empty";
     },
   },

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AppConfig, BotSpec, LlmConfig, McConfig } from "./types.js";
 
 function env(name: string, fallback?: string): string {
@@ -56,8 +57,10 @@ export function loadConfig(): AppConfig {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  const dataDir = process.env.OPENHOST_APP_DATA_DIR || process.env.DATA_DIR || "./data";
   return {
     port: Number(env("PORT", "8080")),
+    dbPath: process.env.DB_PATH || join(dataDir, "minecraft-agents.db"),
     mc,
     llm,
     bots: resolveBots(),

@@ -32,6 +32,8 @@ export interface BotSpec {
 
 export interface AppConfig {
   port: number;
+  /** SQLite file for settings, ownership, and memory (OpenHost app-data dir). */
+  dbPath: string;
   mc: McConfig;
   llm: LlmConfig;
   bots: BotSpec[];

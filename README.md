@@ -48,6 +48,10 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `MAX_BOTS` | `20` | Cap on concurrent **online** workers (logged-out ones don't count) |
 | `MAX_PER_USER` | `5` | Cap on online workers one player may own (0 = unlimited). Live-editable in the dashboard |
 | `PORT` | `8080` | HTTP port (matches `openhost.toml`) |
+| `DB_PATH` | `$OPENHOST_APP_DATA_DIR/minecraft-agents.db` | SQLite file for persisted state; falls back to `$DATA_DIR` then `./data` locally |
+
+Env vars **seed** the config; live settings (host, port, login, per-user cap)
+saved in the DB **override** them on the next boot (see Persistence below).
 
 Workers are normally summoned in-game (below), so `BOT_COUNT` defaults to `0` —
 only the dispatcher runs at boot. Pre-spawning via `BOT_COUNT`/`BOTS_CONFIG` is
@@ -134,6 +138,20 @@ figures, ~100 MB/online worker). `MAX_BOTS` caps concurrent *online* workers;
 raise `memory_mb`/`cpu_millicores` in `openhost.toml` alongside it. Workers
 logging out on task completion naturally frees memory and capacity. For many bots
 on one IP, raise the server's per-IP join/registration limit for the auth plugin.
+
+## Persistence
+
+State lives in a SQLite DB (`node:sqlite`, no native build) on the OpenHost
+`app_data` volume (`$OPENHOST_APP_DATA_DIR`), written on every change:
+
+- **Settings** — server host/port, login message, per-user cap. Override the env
+  seed at boot, so dashboard edits survive a restart/redeploy.
+- **Ownership** — each `agent_N`'s owner, so owned/reserved numbers persist across
+  restarts (offline placeholders are recreated at boot).
+- **Memory** — per-scope waypoints, notes, and the task ledger.
+
+Agent logs, token/traffic counters, and live bot connections stay in-memory
+(diagnostic, high-churn). Delete the DB file to reset all persisted state.
 
 ## Local dev
 

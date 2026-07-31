@@ -22,7 +22,7 @@ export const scopeOf = (ctx: SkillContext): string => ctx.self.owner ?? ctx.self
 export interface SkillContext {
   bot: any;
   mcData: any;
-  memory: MemoryStore;
+  memory: Memory;
   peers: PeerApi;
   self: { username: string; owner: string | null };
   behaviors: Set<string>;
@@ -51,7 +51,7 @@ export interface PeerApi {
 }
 
 export interface SkillEnv {
-  memory: MemoryStore;
+  memory: Memory;
   peers: PeerApi;
 }
 
@@ -60,50 +60,16 @@ export interface LedgerItem {
   status: "todo" | "doing" | "done";
 }
 
-/** Host-side durable memory, scoped per owner (survives a worker logging out). */
-export class MemoryStore {
-  private readonly waypoints = new Map<string, Map<string, Pos>>();
-  private readonly notes = new Map<string, Map<string, string>>();
-  private readonly ledgers = new Map<string, LedgerItem[]>();
-
-  private ns<T>(m: Map<string, Map<string, T>>, scope: string): Map<string, T> {
-    let inner = m.get(scope);
-    if (!inner) m.set(scope, (inner = new Map()));
-    return inner;
-  }
-
-  setWaypoint(scope: string, name: string, pos: Pos): void {
-    this.ns(this.waypoints, scope).set(name, pos);
-  }
-  getWaypoint(scope: string, name: string): Pos | undefined {
-    return this.ns(this.waypoints, scope).get(name);
-  }
-  listWaypoints(scope: string): [string, Pos][] {
-    return [...this.ns(this.waypoints, scope).entries()];
-  }
-
-  setNote(scope: string, key: string, text: string): void {
-    this.ns(this.notes, scope).set(key, text);
-  }
-  listNotes(scope: string, query?: string): [string, string][] {
-    const all = [...this.ns(this.notes, scope).entries()];
-    return query ? all.filter(([k, v]) => k.includes(query) || v.includes(query)) : all;
-  }
-
-  ledger(scope: string): LedgerItem[] {
-    let l = this.ledgers.get(scope);
-    if (!l) this.ledgers.set(scope, (l = []));
-    return l;
-  }
-
-  /** Short text injected into perception each step so plans survive the step budget. */
-  summary(scope: string): string {
-    const l = this.ledger(scope).filter((i) => i.status !== "done");
-    const wp = this.listWaypoints(scope);
-    const parts: string[] = [];
-    if (l.length) parts.push(`ledger: ${l.map((i) => `[${i.status}] ${i.text}`).join("; ")}`);
-    if (wp.length) parts.push(`waypoints: ${wp.map(([n]) => n).join(", ")}`);
-    return parts.join("\n");
-  }
+/** Host-side durable memory, scoped per owner (survives a worker logging out). Backed by SQLite. */
+export interface Memory {
+  setWaypoint(scope: string, name: string, pos: Pos): void;
+  getWaypoint(scope: string, name: string): Pos | undefined;
+  listWaypoints(scope: string): [string, Pos][];
+  setNote(scope: string, key: string, text: string): void;
+  listNotes(scope: string, query?: string): [string, string][];
+  ledger(scope: string): LedgerItem[];
+  /** Upsert a ledger item's status, returning the scope's full ledger. */
+  setLedgerItem(scope: string, text: string, status: LedgerItem["status"]): LedgerItem[];
+  summary(scope: string): string;
 }
 

@@ -22,4 +22,5 @@ memory_mb = 6144
 cpu_millicores = 3000
 
 [data]
-# app_data = true
+# Persistent SQLite DB (settings, ownership, memory) at $OPENHOST_APP_DATA_DIR.
+app_data = true
