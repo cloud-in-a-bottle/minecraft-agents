@@ -7,7 +7,7 @@ All in-game interaction is text in Minecraft chat. Two surfaces:
   `@agents <cmd>` (or the first-letter shorthand `@a <cmd>`) **or** privately with
   `/msg agents <cmd>` (no `@` prefix needed). It always replies **privately**
   (`/msg` back to you), whichever surface you used. Each keyword also has a
-  one-letter alias — its first letter: `n` `f` `c` `q` `g`.
+  one-letter alias — its first letter: `n` `l` `f` `c` `q` `g`.
 - **`@agent_N` / `/msg agent_N`** — an individual worker, for steering it mid-task.
 
 The dispatcher holds **op**: a newly summoned worker is teleported to its owner on
@@ -28,6 +28,7 @@ login.
 | Shape | Meaning |
 |---|---|
 | `@agents new [n] <task>` | Create `n` new workers (default 1) running `<task>`, owned by you. |
+| `@agents list` | List the workers you own — each as `N [state]: goal` (state: working/idle/connecting/error/offline). |
 | `@agents x [y …] <task>` | Give `<task>` to existing workers you own. |
 | `@agents free x [y …]` | Relinquish ownership of those workers (they become unowned / claimable). |
 | `@agents claim x [y …]` | Take ownership of those numbers — unowned or previously freed ones, or a number that doesn't exist yet. Logs you as owner without connecting the bot; task later with `@agents x <task>` to bring it online. |
@@ -43,6 +44,7 @@ creates as many as fit and says so privately, e.g.
 ```
 @agents new collect 10 oak_log            # 1 new worker
 @agents new 3 mine iron ore               # 3 new workers, same goal
+@agents list                              # list the workers you own + their state/goal
 @agents 1 2 build a dirt wall            # retask agent_1 and agent_2 (must be yours)
 @agents agent_4 follow me                 # agent_ prefix also accepted
 @agents free 1 2                         # give up agent_1, agent_2

@@ -48,8 +48,8 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `COMMAND_ALLOWLIST` | — | Comma-separated usernames allowed to command `@<dispatcher>`; empty = anyone |
 | `MAX_BOTS` | `20` | Cap on concurrent **online** workers (logged-out ones don't count) |
 | `MAX_PER_USER` | `5` | Cap on online workers one player may own (0 = unlimited). Live-editable in the dashboard |
-| `MC_VIEW_DISTANCE` | server default | Worker view-distance (`tiny`..`far` or chunk count); cuts per-bot RAM **only** on servers with per-player view-distance (Paper/Folia). The dispatcher always uses `tiny` |
-| `CHUNK_KEEP_RADIUS` | `4` | Drop each bot's loaded chunks beyond this radius to cap the roaming world-copy leak. **Must be ≥ the server's view-distance** or blocks near the bot go missing |
+| `MC_VIEW_DISTANCE` | `10` | Worker view-distance (`tiny`..`far` or chunk count); cuts per-bot RAM **only** on servers with per-player view-distance (Paper/Folia). The dispatcher always uses `tiny` |
+| `CHUNK_KEEP_RADIUS` | `11` | Drop each bot's loaded chunks beyond this radius to cap the roaming world-copy leak. **Must be ≥ the server's view-distance** or blocks near the bot go missing |
 | `PORT` | `8080` | HTTP port (matches `openhost.toml`) |
 | `DB_PATH` | `$OPENHOST_APP_DATA_DIR/minecraft-agents.db` | SQLite file for persisted state; falls back to `$DATA_DIR` then `./data` locally |
 | `LIBRARY_DIR` | `$OPENHOST_APP_DATA_DIR/library` | Shared library of bot-authored **routines** (`routines/`) and **settings** (`settings/`), as JSON files (not the DB); one collection every agent reads and writes |
@@ -108,6 +108,7 @@ login. Full grammar, ownership rules, responses, and the HTTP equivalents are in
 
 ```
 @agents new 3 mine iron ore          # create 3 workers (shorthand: @a n 3 …)
+@agents list                         # list the workers you own (shorthand: @a l)
 @agents 1 2 build a wall            # task workers you own
 @agents quit 1                       # disconnect agent_1 now
 @agent_1 focus on oak                # steer a running worker (owner only)

@@ -1,9 +1,6 @@
 //! Static, type-agnostic crafting recipe table (azalea 0.15.1 ships no client recipe DB).
 //! Generated from minecraft-data pc/1.21.11 into `data/recipes.json`, name-keyed by result.
-//!
-//! Craft integration: `craft_item`/`craft_station` in skills/iron.rs call `recipes_all` +
-//! family matching for craftability; ACTUAL craft execution vs azalea's container menu is a
-//! separate integration TODO (azalea has no high-level `craft()`).
+//! `skills::iron::craft` drives azalea's container menu from `choose_recipe` + family matching.
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -183,11 +180,15 @@ fn expand(name: &str, count: u32, depth: u32, pool: &mut HashMap<String, u32>, n
     }
 }
 
-/// True if some recipe for `item_name` has all direct ingredients covered by family-pooled
-/// inventory, honoring its crafting-table requirement (mirrors mineflayer `recipesFor`).
-pub fn can_craft(item_name: &str, inventory: &HashMap<String, u32>, has_table: bool) -> bool {
+/// First recipe for `item_name` whose direct ingredients are covered by family-pooled inventory,
+/// honoring its crafting-table requirement (mirrors mineflayer `recipesFor`).
+pub fn choose_recipe(
+    item_name: &str,
+    inventory: &HashMap<String, u32>,
+    has_table: bool,
+) -> Option<&'static Recipe> {
     let pool = family_pool(inventory);
-    recipes_all(item_name).iter().any(|r| {
+    recipes_all(item_name).iter().find(|r| {
         if r.requires_table && !has_table {
             return false;
         }
@@ -203,4 +204,73 @@ pub fn can_craft(item_name: &str, inventory: &HashMap<String, u32>, has_table: b
             }
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inv(items: &[(&str, u32)]) -> HashMap<String, u32> {
+        items.iter().map(|(n, c)| (n.to_string(), *c)).collect()
+    }
+
+    #[test]
+    fn recipe_table_loads() {
+        assert!(RECIPES.len() > 800);
+        assert!(!recipes_all("oak_planks").is_empty());
+        assert!(recipes_all("not_a_real_item").is_empty());
+    }
+
+    #[test]
+    fn families() {
+        assert_eq!(item_family("oak_planks"), "planks");
+        assert_eq!(item_family("dark_oak_log"), "log");
+        assert_eq!(item_family("cobbled_deepslate"), "deepslate");
+        assert_eq!(item_family("stick"), "stick");
+    }
+
+    #[test]
+    fn planks_from_logs_no_table() {
+        let r = choose_recipe("oak_planks", &inv(&[("oak_log", 1)]), false).unwrap();
+        assert!(!r.requires_table);
+        assert_eq!(r.result.count, 4);
+        assert!(choose_recipe("oak_planks", &inv(&[]), false).is_none());
+    }
+
+    #[test]
+    fn family_agnostic_ingredients() {
+        // stick's recipe lists cherry_planks, but any *_planks must satisfy it.
+        let r = choose_recipe("stick", &inv(&[("birch_planks", 2)]), false);
+        assert!(r.is_some(), "birch_planks should satisfy a cherry_planks recipe slot");
+        assert_eq!(r.unwrap().result.count, 4);
+    }
+
+    #[test]
+    fn table_requirement_is_honored() {
+        let have = inv(&[("oak_planks", 3), ("stick", 2)]);
+        assert!(choose_recipe("wooden_pickaxe", &have, false).is_none(), "pickaxe needs a table");
+        let r = choose_recipe("wooden_pickaxe", &have, true).unwrap();
+        assert!(r.requires_table);
+        // crafting_table itself is a 2x2 recipe — craftable without a table.
+        assert!(choose_recipe("crafting_table", &inv(&[("spruce_planks", 4)]), false).is_some());
+    }
+
+    #[test]
+    fn missing_materials_expand_to_base() {
+        // Nothing on hand: a pickaxe expands down to raw logs.
+        let missing = missing_base_materials("wooden_pickaxe", 1, &inv(&[]));
+        assert!(!missing.is_empty());
+        assert!(missing.iter().all(|(n, _)| item_family(n) == "log"));
+        // With the direct ingredients present, nothing is missing.
+        assert!(missing_base_materials("wooden_pickaxe", 1, &inv(&[("oak_planks", 3), ("stick", 2)])).is_empty());
+    }
+
+    #[test]
+    fn consolidate_collapses_species_to_wildcard() {
+        let c = consolidate(recipes_all("wooden_pickaxe"));
+        assert!(c.requires_table);
+        assert_eq!(c.out, 1);
+        assert!(c.ingredients.iter().any(|i| i == "*_planks x3"), "got {:?}", c.ingredients);
+        assert!(c.ingredients.iter().any(|i| i == "stick x2"), "got {:?}", c.ingredients);
+    }
 }

@@ -415,6 +415,15 @@ impl DispatchHandlers for Inner {
     fn give(&self, numbers: &[u32], owner: &str, target: &str) -> BatchResult {
         self.arc().give(numbers, owner, target)
     }
+    fn list(&self, owner: &str) -> Vec<AgentStatus> {
+        let fleet = self.state.lock();
+        fleet
+            .agents
+            .values()
+            .filter(|a| a.owner().as_deref() == Some(owner))
+            .map(|a| a.status())
+            .collect()
+    }
 }
 
 /// Owns the dispatcher and every worker; handles creation, ownership, and reuse.

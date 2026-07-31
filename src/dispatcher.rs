@@ -14,7 +14,10 @@ use regex::Regex;
 use tokio::task::JoinHandle;
 
 use crate::mc::{kick_reason, log_line, socket_bytes, start_chunk_prune, Auth, Reconnector};
-use crate::types::{AuthMode, BatchResult, CreateResult, DispatcherStatus, McConfig, RejectReason};
+use crate::types::{
+    AgentState, AgentStatus, AuthMode, BatchResult, CreateResult, DispatcherStatus, McConfig,
+    RejectReason,
+};
 
 /// Manager-provided callbacks (port of the TS `DispatchHandlers` interface). manager.rs impls this.
 pub trait DispatchHandlers: Send + Sync {
@@ -24,6 +27,8 @@ pub trait DispatchHandlers: Send + Sync {
     fn claim(&self, numbers: &[u32], owner: &str) -> BatchResult;
     fn quit(&self, numbers: &[u32], owner: &str) -> BatchResult;
     fn give(&self, numbers: &[u32], owner: &str, target: &str) -> BatchResult;
+    /// Agents the caller owns (online and offline), for the `list` command.
+    fn list(&self, owner: &str) -> Vec<AgentStatus>;
 }
 
 /// Parse "1 2 agent_3" into numbers; commas tolerated.
@@ -384,6 +389,22 @@ fn skipped_note(r: &BatchResult) -> String {
     format!(" (skipped {})", items.join(", "))
 }
 
+/// Sort key from an `agent_N` username.
+fn agent_number(username: &str) -> u32 {
+    username.strip_prefix("agent_").and_then(|n| n.parse().ok()).unwrap_or(0)
+}
+
+/// Human word for the list command (`Stopped` reads as offline/logged-out to players).
+fn state_word(state: AgentState) -> &'static str {
+    match state {
+        AgentState::Connecting => "connecting",
+        AgentState::Idle => "idle",
+        AgentState::Working => "working",
+        AgentState::Error => "error",
+        AgentState::Stopped => "offline",
+    }
+}
+
 fn done_or_nothing(done: &[String]) -> String {
     if done.is_empty() {
         "nothing".to_string()
@@ -400,15 +421,16 @@ fn handle_command(shared: &Shared, username: &str, rest: &str) {
     if rest.is_empty() {
         shared.reply(
             username,
-            "usage: new [n] <task> | <n> [n…] <task> | free/claim/quit <n> [n…] | give <n> [n…] <player>",
+            "usage: new [n] <task> | <n> [n…] <task> | list | free/claim/quit <n> [n…] | give <n> [n…] <player>",
         );
         return;
     }
 
-    // Each keyword also accepts its first letter (n/f/c/q/g).
-    let cmd = Regex::new(r"(?i)^(new|n|free|f|claim|c|quit|q|give|g)\b\s*(.*)$").unwrap().captures(rest);
+    // Each keyword also accepts its first letter (n/l/f/c/q/g).
+    let cmd = Regex::new(r"(?i)^(new|n|list|l|free|f|claim|c|quit|q|give|g)\b\s*(.*)$").unwrap().captures(rest);
     let keyword = cmd.as_ref().map(|c| match c[1].to_lowercase().as_str() {
         "n" => "new",
+        "l" => "list",
         "f" => "free",
         "c" => "claim",
         "q" => "quit",
@@ -441,6 +463,25 @@ fn handle_command(shared: &Shared, username: &str, rest: &str) {
                 format!("cannot summon — {limit}")
             };
             shared.reply(username, &msg);
+        }
+        Some("list") => {
+            let mut agents = shared.handlers.list(username);
+            agents.sort_by_key(|a| agent_number(&a.username));
+            if agents.is_empty() {
+                shared.reply(username, "you don't own any agents");
+                return;
+            }
+            let lines: Vec<String> = agents
+                .iter()
+                .map(|a| {
+                    let n = a.username.strip_prefix("agent_").unwrap_or(&a.username);
+                    match a.goal.as_deref().filter(|g| !g.is_empty()) {
+                        Some(g) => format!("{n} [{}]: {g}", state_word(a.state)),
+                        None => format!("{n} [{}]", state_word(a.state)),
+                    }
+                })
+                .collect();
+            shared.reply(username, &format!("your agents: {}", lines.join("; ")));
         }
         Some(k @ ("free" | "claim" | "quit")) => {
             let numbers = parse_numbers(&args);

@@ -73,14 +73,14 @@ fn effort_str(e: Effort) -> String {
     .to_string()
 }
 
-/// Client-info view distance from the config string ("tiny".."far" or a chunk count); default 3.
+/// Client-info view distance from the config string ("tiny".."far" or a chunk count); default 10.
 fn view_chunks(v: &Option<String>) -> u8 {
     match v.as_deref() {
         Some("tiny") => 2,
         Some("short") => 4,
         Some("far") => 12,
-        Some(s) => s.parse().unwrap_or(3),
-        None => 3,
+        Some(s) => s.parse().unwrap_or(10),
+        None => 10,
     }
 }
 

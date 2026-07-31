@@ -435,16 +435,9 @@ impl Skill for CraftStation {
         }
         // Ensure we hold the station item, crafting it if needed.
         if !have_item(ctx, item_id) {
-            let table = ctx.mc_data.block_id("crafting_table").and_then(|id| find_block_within(ctx, id, 4.0));
-            let inventory = inventory_by_name(ctx);
-            if !recipes::can_craft(station, &inventory, table.is_some()) {
-                let extra = if station != "crafting_table" { " or a crafting table" } else { "" };
-                return format!("error: cannot craft {station} (missing materials{extra})");
-            }
-            // TODO(verify): azalea has no high-level craft(); actual craft execution is a separate integration TODO.
-            craft_item(ctx, item_id, table).await;
+            let msg = craft(ctx, station, 1).await;
             if !have_item(ctx, item_id) {
-                return format!("error: crafted {station} but it is not in inventory");
+                return format!("error: {msg}");
             }
         }
         // Place on top of a solid block in an empty adjacent cell.
@@ -468,10 +461,198 @@ impl Skill for CraftStation {
     }
 }
 
-/// Craft one `item_id` (optionally at a table). TODO(verify): azalea 0.15.1 crafting is not
-/// exposed the way mineflayer's recipesFor/craft is; returns false until wired.
-async fn craft_item(_ctx: &SkillContext, _item_id: u32, _table: Option<BlockPos>) -> bool {
+/// One recipe cell: the crafting-menu grid slot and the concrete ingredient it wants.
+struct Cell {
+    slot: usize,
+    name: String,
+}
+
+/// Lay a recipe onto a `grid_w`×`grid_w` menu grid (slots 1-based, row-major). None if it doesn't fit.
+fn plan_cells(r: &recipes::Recipe, grid_w: usize) -> Option<Vec<Cell>> {
+    let mut cells = Vec::new();
+    if let Some(shape) = &r.in_shape {
+        if shape.len() > grid_w {
+            return None;
+        }
+        for (ri, row) in shape.iter().enumerate() {
+            if row.len() > grid_w {
+                return None;
+            }
+            for (ci, cell) in row.iter().enumerate() {
+                if let Some(n) = cell {
+                    cells.push(Cell { slot: 1 + ri * grid_w + ci, name: n.clone() });
+                }
+            }
+        }
+    } else if let Some(ings) = &r.ingredients {
+        if ings.len() > grid_w * grid_w {
+            return None;
+        }
+        for (i, n) in ings.iter().enumerate() {
+            cells.push(Cell { slot: 1 + i, name: n.clone() });
+        }
+    }
+    Some(cells)
+}
+
+/// Player-inventory slot holding `concrete` (exact item preferred, else same material family).
+fn find_source(handle: &azalea::container::ContainerHandle, concrete: &str, ctx: &SkillContext) -> Option<usize> {
+    let menu = handle.menu()?;
+    let slots = menu.slots();
+    let family = recipes::item_family(concrete);
+    let mut fam_hit = None;
+    for i in menu.player_slots_range() {
+        let Some(s) = slots.get(i) else { continue };
+        if !s.is_present() {
+            continue;
+        }
+        let Some(nm) = ctx.mc_data.item_name(s.kind().to_u32()) else { continue };
+        if nm == concrete {
+            return Some(i);
+        }
+        if fam_hit.is_none() && recipes::item_family(&nm) == family {
+            fam_hit = Some(i);
+        }
+    }
+    fam_hit
+}
+
+fn slot_count(handle: &azalea::container::ContainerHandle, i: usize) -> i32 {
+    handle.slots().and_then(|s| s.get(i).map(|x| x.count())).unwrap_or(0)
+}
+
+fn count_item(ctx: &SkillContext, item_id: u32) -> i32 {
+    inventory_items(ctx).iter().filter(|(id, _)| *id == item_id).map(|(_, c)| *c).sum()
+}
+
+/// Wait (up to ~1s) for the server to populate the crafting result slot.
+async fn wait_result(handle: &azalea::container::ContainerHandle, result_slot: usize) -> bool {
+    for _ in 0..10 {
+        crate::mc::sleep(100).await;
+        if let Some(s) = handle.slots().and_then(|s| s.get(result_slot).cloned()) {
+            if s.is_present() {
+                return true;
+            }
+        }
+    }
     false
+}
+
+/// Deposit `per_cell` of each ingredient into its grid cell via cursor pick-up + right-click.
+/// False if an ingredient ran out mid-lay. Leaves the cursor empty.
+async fn place_cells(
+    handle: &azalea::container::ContainerHandle,
+    cells: &[Cell],
+    per_cell: i32,
+    ctx: &SkillContext,
+) -> bool {
+    let mut held: Option<(usize, i32)> = None; // (source slot, remaining on cursor)
+    let mut held_family = String::new();
+    let mut ok = true;
+    'outer: for cell in cells {
+        let fam = recipes::item_family(&cell.name).to_string();
+        for _ in 0..per_cell {
+            let reuse = matches!(&held, Some((_, rem)) if *rem > 0) && held_family == fam;
+            if !reuse {
+                if let Some((src, rem)) = held.take() {
+                    if rem > 0 {
+                        handle.left_click(src);
+                        crate::mc::sleep(50).await;
+                    }
+                }
+                let Some(src) = find_source(handle, &cell.name, ctx) else {
+                    ok = false;
+                    break 'outer;
+                };
+                let cnt = slot_count(handle, src);
+                handle.left_click(src);
+                crate::mc::sleep(50).await;
+                held = Some((src, cnt));
+                held_family = fam.clone();
+            }
+            handle.right_click(cell.slot);
+            crate::mc::sleep(50).await;
+            if let Some((_, rem)) = held.as_mut() {
+                *rem -= 1;
+            }
+        }
+    }
+    if let Some((src, rem)) = held.take() {
+        if rem > 0 {
+            handle.left_click(src);
+            crate::mc::sleep(50).await;
+        }
+    }
+    ok
+}
+
+/// Craft `count` of `name`, driving the 3x3 table (if required/near) or the 2x2 player grid.
+/// Type/family-agnostic on ingredients; returns a planner-facing sentence.
+pub async fn craft(ctx: &SkillContext, name: &str, count: i32) -> String {
+    let item_id = match ctx.mc_data.item_id(name) {
+        Some(id) => id,
+        None => return format!("unknown item \"{name}\""),
+    };
+    if recipes::recipes_all(name).is_empty() {
+        return format!("no recipe for {name}");
+    }
+    let want = count.max(1);
+    let table = ctx.mc_data.block_id("crafting_table").and_then(|id| find_block_within(ctx, id, 4.0));
+    let inv = inventory_by_name(ctx);
+    let recipe = match recipes::choose_recipe(name, &inv, table.is_some()) {
+        Some(r) => r,
+        None => {
+            return if recipes::choose_recipe(name, &inv, true).is_some() {
+                format!("need a crafting table nearby to craft {name} — use craft_station first")
+            } else {
+                format!("cannot craft {name} (missing materials)")
+            };
+        }
+    };
+    let grid_w = if recipe.requires_table { 3 } else { 2 };
+    let cells = match plan_cells(recipe, grid_w) {
+        Some(c) if !c.is_empty() => c,
+        _ => return format!("cannot lay out recipe for {name}"),
+    };
+    let out_per = (recipe.result.count.max(1)) as i32;
+    let crafts = ((want + out_per - 1) / out_per).min(64);
+
+    let before = count_item(ctx, item_id);
+    let handle = if recipe.requires_table {
+        match ctx.bot.open_container_at(table.unwrap()).await {
+            Some(h) => h,
+            None => return "error: could not open crafting table".into(),
+        }
+    } else {
+        match ctx.bot.open_inventory() {
+            Some(h) => h,
+            None => return "error: could not open inventory (a container is already open)".into(),
+        }
+    };
+
+    place_cells(&handle, &cells, crafts, ctx).await;
+    // One shift-click per craft: the server refills the grid + result until ingredients run dry.
+    for _ in 0..crafts {
+        if !wait_result(&handle, 0).await {
+            break;
+        }
+        handle.shift_click(0usize);
+        crate::mc::sleep(120).await;
+    }
+    // Return any unconsumed ingredients from the grid, then close.
+    for cell in &cells {
+        handle.shift_click(cell.slot);
+        crate::mc::sleep(40).await;
+    }
+    handle.close();
+    crate::mc::sleep(150).await;
+
+    let delta = (count_item(ctx, item_id) - before).max(0);
+    if delta > 0 {
+        format!("crafted {delta} {name}")
+    } else {
+        format!("could not craft {name} (missing materials or no result)")
+    }
 }
 
 pub struct DigStaircase;
@@ -558,4 +739,72 @@ pub fn skills() -> Vec<Arc<dyn Skill>> {
         Arc::new(DigStaircase),
         Arc::new(StripMine),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shaped(rows: &[&[Option<&str>]], requires_table: bool) -> recipes::Recipe {
+        recipes::Recipe {
+            result: recipes::ItemStack { name: "x".into(), count: 1 },
+            ingredients: None,
+            in_shape: Some(
+                rows.iter().map(|r| r.iter().map(|c| c.map(str::to_string)).collect()).collect(),
+            ),
+            requires_table,
+        }
+    }
+
+    fn cells_of(r: &recipes::Recipe, grid_w: usize) -> Vec<(usize, String)> {
+        plan_cells(r, grid_w).unwrap().into_iter().map(|c| (c.slot, c.name)).collect()
+    }
+
+    #[test]
+    fn shapeless_fills_leading_grid_slots() {
+        let r = recipes::Recipe {
+            result: recipes::ItemStack { name: "oak_planks".into(), count: 4 },
+            ingredients: Some(vec!["oak_log".into()]),
+            in_shape: None,
+            requires_table: false,
+        };
+        assert_eq!(cells_of(&r, 2), vec![(1, "oak_log".to_string())]);
+    }
+
+    #[test]
+    fn shaped_2x2_maps_row_major_from_slot_1() {
+        let r = shaped(&[&[Some("oak_planks"), Some("oak_planks")], &[Some("oak_planks"), Some("oak_planks")]], false);
+        let slots: Vec<usize> = cells_of(&r, 2).into_iter().map(|(s, _)| s).collect();
+        assert_eq!(slots, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn shaped_pickaxe_places_gaps_correctly() {
+        // planks across the top row, sticks down the middle column; nulls are skipped.
+        let r = shaped(
+            &[
+                &[Some("cherry_planks"), Some("cherry_planks"), Some("cherry_planks")],
+                &[None, Some("stick"), None],
+                &[None, Some("stick"), None],
+            ],
+            true,
+        );
+        assert_eq!(
+            cells_of(&r, 3),
+            vec![
+                (1, "cherry_planks".into()),
+                (2, "cherry_planks".into()),
+                (3, "cherry_planks".into()),
+                (5, "stick".into()),
+                (8, "stick".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_shape_wider_than_grid() {
+        let r = shaped(&[&[Some("a"), Some("a"), Some("a")]], false);
+        assert!(plan_cells(&r, 2).is_none(), "3-wide shape must not fit a 2x2 grid");
+        assert!(plan_cells(&r, 3).is_some());
+    }
 }

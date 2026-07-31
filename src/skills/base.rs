@@ -380,7 +380,14 @@ async fn run(ctx: &SkillContext, name: &str, input: &Value) -> anyhow::Result<St
             }
             let mut mined = 0usize;
             let mut picked = 0usize;
+            let mut interrupted = false;
             for at in &targets {
+                // Bail between blocks if an owner/teammate message or damage is pending, so a long
+                // gather doesn't stonewall the planner — it re-plans and can act on the message.
+                if (ctx.wake)() {
+                    interrupted = true;
+                    break;
+                }
                 let center = at.center();
                 let _ = with_timeout(bot.goto(RadiusGoal::new(center, 2.0)), 20_000, "approach").await;
                 if self_pos(bot).map(|p| p.distance_to(center)).unwrap_or(99.0) > 5.0 {
@@ -396,13 +403,15 @@ async fn run(ctx: &SkillContext, name: &str, input: &Value) -> anyhow::Result<St
                     picked += collect_nearby_drops(bot, 5.0).await;
                 }
             }
-            if mined == 0 {
+            if mined == 0 && !interrupted {
                 return Ok(format!(
                     "can't path to the nearest {bname} (blocked or too far). Relocate first with go_toward \"{bname}\", then collect again."
                 ));
             }
             picked += collect_nearby_drops(bot, 6.0).await; // final sweep for stragglers
-            if picked > 0 {
+            if interrupted {
+                format!("stopped early ({mined} {bname}, {picked} drop(s)) — a message or event needs your attention; handle it, then resume")
+            } else if picked > 0 {
                 format!("collected up to {mined} {bname} ({picked} drop(s) gathered)")
             } else {
                 format!("collected up to {mined} {bname}")
@@ -467,13 +476,12 @@ async fn run(ctx: &SkillContext, name: &str, input: &Value) -> anyhow::Result<St
         }
 
         "craft_item" => {
-            // TODO(verify): azalea 0.15 exposes no crafting/recipe API; the iron module owns real
-            // crafting. Base craft is a stub so unknown-item errors still match.
             let iname = gs(input, "name");
             if item_kind_from_name(iname).is_none() {
                 return Ok(format!("unknown item \"{iname}\""));
             }
-            format!("cannot craft {iname} (crafting not yet implemented in the azalea port)")
+            let count = gi(input, "count").max(1) as i32;
+            crate::skills::iron::craft(ctx, iname, count).await
         }
 
         "equip_item" => {
