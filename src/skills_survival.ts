@@ -22,7 +22,6 @@ export const skills: Skill[] = [
     tool: {
       name: "dig_down_safe",
       description: "Mine straight down up to <depth> blocks, stopping before any lava/water/void two blocks below. Returns blocks descended.",
-      strict: true,
       input_schema: obj({ depth: { type: "integer" } }, ["depth"]),
     },
     async run(ctx: SkillContext, input: any): Promise<string> {

@@ -14,7 +14,6 @@ export const skills: Skill[] = [
     tool: {
       name: "save_waypoint",
       description: "Record the bot's current position under a name for later recall (use \"base\" for a home base).",
-      strict: true,
       input_schema: obj({ name: { type: "string" } }, ["name"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -27,7 +26,6 @@ export const skills: Skill[] = [
     tool: {
       name: "goto_waypoint",
       description: "Pathfind to a previously saved waypoint by name.",
-      strict: true,
       input_schema: obj({ name: { type: "string" } }, ["name"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -49,7 +47,6 @@ export const skills: Skill[] = [
     tool: {
       name: "list_waypoints",
       description: "List saved waypoints with coordinates and distance from the bot.",
-      strict: true,
       input_schema: obj({}, []),
     },
     run: async (ctx: SkillContext, _input: any): Promise<string> => {
@@ -64,7 +61,6 @@ export const skills: Skill[] = [
     tool: {
       name: "remember_note",
       description: "Store a freeform note or learning under a key for later recall.",
-      strict: true,
       input_schema: obj({ key: { type: "string" }, text: { type: "string" } }, ["key", "text"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -76,7 +72,6 @@ export const skills: Skill[] = [
     tool: {
       name: "recall_notes",
       description: "Recall stored notes, optionally filtered by a query (empty string returns all).",
-      strict: true,
       input_schema: obj({ query: { type: "string" } }, ["query"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -90,7 +85,6 @@ export const skills: Skill[] = [
     tool: {
       name: "update_ledger",
       description: "Set the status (todo|doing|done) of a ledger item, adding it if new.",
-      strict: true,
       input_schema: obj(
         { item: { type: "string" }, status: { type: "string", enum: ["todo", "doing", "done"] } },
         ["item", "status"],
@@ -106,7 +100,6 @@ export const skills: Skill[] = [
     tool: {
       name: "read_ledger",
       description: "Read the current task ledger.",
-      strict: true,
       input_schema: obj({}, []),
     },
     run: async (ctx: SkillContext, _input: any): Promise<string> => {

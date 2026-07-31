@@ -35,6 +35,7 @@ function parseLeadingNumbers(str: string): { numbers: number[]; rest: string } {
 export class Dispatcher {
   private bot: Bot | null = null;
   private stopped = false;
+  private live = false; // true from connect until "end" (covers the pre-spawn limbo state)
   private mcInBase = 0;
   private mcOutBase = 0;
   private readonly log: string[] = [];
@@ -68,6 +69,7 @@ export class Dispatcher {
       auth: this.mc.auth,
     });
     this.bot = bot;
+    this.live = true;
     bot.once("spawn", () => {
       this.reconnector.markConnected();
       this.note("dispatcher online");
@@ -80,6 +82,7 @@ export class Dispatcher {
     bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
+      this.live = false;
       if (this.stopped) return;
       const delay = this.reconnector.scheduleReconnect(() => !this.stopped);
       if (delay) this.note(`disconnected; reconnecting in ${delay / 1000}s`);
@@ -163,10 +166,11 @@ export class Dispatcher {
     safeQuit(this.bot);
   }
 
-  /** Reconnect to pick up a new host/login. Restart directly if it had given up. */
+  /** Reconnect to pick up a new host/login, even from pre-spawn limbo. */
   reconnect(): void {
     this.reconnector.reset();
-    if (this.bot?.entity) safeQuit(this.bot); // "end" handler reconnects with the current config
+    this.stopped = false;
+    if (this.live) safeQuit(this.bot); // "end" handler reconnects with the current config
     else this.start();
   }
 
@@ -177,7 +181,7 @@ export class Dispatcher {
       online: !!this.bot?.entity,
       netIn: this.mcInBase + s.in,
       netOut: this.mcOutBase + s.out,
-      log: this.log.slice(-20),
+      log: this.log.slice(-100),
     };
   }
 }

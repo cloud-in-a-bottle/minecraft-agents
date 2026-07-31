@@ -58,7 +58,6 @@ export const skills: Skill[] = [
     tool: {
       name: "match_item_names",
       description: "Search item names by regex (case-insensitive) — Minecraft item ids are often unintuitive. Returns matching names.",
-      strict: true,
       input_schema: obj({ pattern: { type: "string" }, limit: { type: "integer" } }, ["pattern", "limit"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -72,7 +71,6 @@ export const skills: Skill[] = [
     tool: {
       name: "get_recipe",
       description: "Show the first crafting recipe for an item: ingredients with counts, output count, and whether a crafting table is required.",
-      strict: true,
       input_schema: obj({ item: { type: "string" } }, ["item"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -96,7 +94,6 @@ export const skills: Skill[] = [
     tool: {
       name: "get_block_info",
       description: "Report a block's hardness, the tool tier needed to get drops, and whether the held item can harvest it.",
-      strict: true,
       input_schema: obj({ block: { type: "string" } }, ["block"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -116,7 +113,6 @@ export const skills: Skill[] = [
     tool: {
       name: "inventory_gap",
       description: "Recursively expand a target item's recipe tree, subtract current inventory, and list the base materials still missing.",
-      strict: true,
       input_schema: obj({ item: { type: "string" }, count: { type: "integer" } }, ["item", "count"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -149,7 +145,6 @@ export const skills: Skill[] = [
     tool: {
       name: "smelt",
       description: "Smelt items in the nearest furnace (within 6 blocks) using the given fuel. If no furnace is near, asks the planner to place one via craft_station.",
-      strict: true,
       input_schema: obj({ input: { type: "string" }, fuel: { type: "string" }, count: { type: "integer" } }, ["input", "fuel", "count"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -187,7 +182,6 @@ export const skills: Skill[] = [
     tool: {
       name: "craft_station",
       description: "Ensure a crafting_table, furnace, or blast_furnace is placed within reach. Returns its coordinates or a clear error.",
-      strict: true,
       input_schema: obj({ station: { type: "string", enum: ["crafting_table", "furnace", "blast_furnace"] } }, ["station"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -228,7 +222,6 @@ export const skills: Skill[] = [
     tool: {
       name: "dig_staircase",
       description: "Dig a descending 2-high staircase down to a target Y (bounded), placing torches as it goes and stopping at lava.",
-      strict: true,
       input_schema: obj({ target_y: { type: "integer" } }, ["target_y"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -256,7 +249,6 @@ export const skills: Skill[] = [
     tool: {
       name: "strip_mine",
       description: "Dig a 1-wide, 2-high tunnel in a cardinal direction for N blocks (max 64), placing torches and stopping at lava.",
-      strict: true,
       input_schema: obj({ direction: { type: "string", enum: ["north", "south", "east", "west"] }, length: { type: "integer" } }, ["direction", "length"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {

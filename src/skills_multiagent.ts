@@ -6,7 +6,6 @@ export const skills: Skill[] = [
     tool: {
       name: "summon_agents",
       description: "Summon <count> helper agents to work on <goal>. They are owned by your owner and count toward that player's agent cap.",
-      strict: true,
       input_schema: obj({ count: { type: "integer" }, goal: { type: "string" } }, ["count", "goal"]),
     },
     run: async (ctx: SkillContext, input): Promise<string> => {
@@ -19,7 +18,6 @@ export const skills: Skill[] = [
     tool: {
       name: "activate_block",
       description: "Right-click the block at a coordinate to toggle a door, lever, button, or pressure plate.",
-      strict: true,
       input_schema: obj({ x: { type: "integer" }, y: { type: "integer" }, z: { type: "integer" } }, ["x", "y", "z"]),
     },
     run: async (ctx: SkillContext, input): Promise<string> => {
@@ -38,7 +36,6 @@ export const skills: Skill[] = [
     tool: {
       name: "collect_drops",
       description: "Walk over nearby dropped items within a radius to pick them up. Returns how many were gathered.",
-      strict: true,
       input_schema: obj({ radius: { type: "integer" } }, ["radius"]),
     },
     run: async (ctx: SkillContext, input): Promise<string> => {
@@ -71,7 +68,6 @@ export const skills: Skill[] = [
     tool: {
       name: "give_item",
       description: "Toss items to another agent or a human player: face them and drop the given count of the item.",
-      strict: true,
       input_schema: obj({ target: { type: "string" }, item: { type: "string" }, count: { type: "integer" } }, ["target", "item", "count"]),
     },
     run: async (ctx: SkillContext, input): Promise<string> => {
@@ -97,7 +93,6 @@ export const skills: Skill[] = [
     tool: {
       name: "go_to_agent",
       description: "Walk to within <range> blocks of another agent's current position.",
-      strict: true,
       input_schema: obj({ agent: { type: "string" }, range: { type: "integer" } }, ["agent", "range"]),
     },
     run: async (ctx: SkillContext, input): Promise<string> => {
@@ -116,7 +111,6 @@ export const skills: Skill[] = [
     tool: {
       name: "send_agent_message",
       description: "Send an in-process message to another agent's planning loop (coordination, no game chat).",
-      strict: true,
       input_schema: obj({ agent: { type: "string" }, message: { type: "string" } }, ["agent", "message"]),
     },
     run: async (ctx: SkillContext, input): Promise<string> => {

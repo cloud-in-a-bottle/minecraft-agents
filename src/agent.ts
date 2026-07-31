@@ -36,6 +36,7 @@ export class Agent {
   private mcInBase = 0; // bytes from previous (closed) connections
   private mcOutBase = 0;
   private stopped = false;
+  private live = false; // true from connect until "end" (covers the pre-spawn limbo state)
   private looping = false;
   private effortOk = true;
   private thinkingOk = true;
@@ -113,6 +114,7 @@ export class Agent {
     bot.loadPlugin(collectBlock);
     bot.loadPlugin(pvp);
     this.bot = bot;
+    this.live = true;
 
     bot.once("spawn", () => {
       this.mcData = mcDataLoader(bot.version);
@@ -132,6 +134,7 @@ export class Agent {
     bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
+      this.live = false;
       if (this.stopped) return;
       this.state = "connecting";
       const delay = this.reconnector.scheduleReconnect(() => !this.stopped);
@@ -324,12 +327,13 @@ export class Agent {
     return this.state !== "stopped";
   }
 
-  /** Reconnect an idle online bot (to pick up a new host/login). Skips busy/stopped ones. */
+  /** Reconnect an idle bot (to pick up a new host/login), even from pre-spawn limbo. Skips busy/stopped ones. */
   reconnect(): void {
     if (this.state === "stopped" || this.looping) return;
     this.reconnector.reset();
-    if (this.bot?.entity) safeQuit(this.bot); // "end" handler reconnects using the current mc config
-    else if (!this.stopped) this.start();
+    this.stopped = false;
+    if (this.live) safeQuit(this.bot); // "end" handler reconnects using the current mc config
+    else this.start();
   }
 
   status(): AgentStatus {
