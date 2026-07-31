@@ -44,7 +44,7 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   <span class=stat>tokens <span id=tok>0</span></span>
   <span class=stat>traffic <span id=net>0</span></span>
   <span class=stat>server <input id=host placeholder=host style="width:200px"> : <input id=port type=number style="width:78px"></span>
-  <span class=stat>login <input id=login type=text placeholder="/login <pw>" style="width:150px" title="sent in chat on spawn; use newlines for multi-step, e.g. /register then /login"></span>
+  <span class=stat>login <input id=login type=text placeholder="/login <pw>" style="width:200px" title="sent on join; two-step with &&, e.g. /register <pw> <pw> && /login <pw>"></span>
   <button id=apply disabled title="reconnects the fleet">apply</button>
   <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon, no restart"></span>
   <span class=stat muted id=upd></span>

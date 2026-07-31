@@ -37,7 +37,7 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `MC_PORT` | `25565` | Server port — **also editable live in the dashboard** |
 | `MC_VERSION` | auto | Pin if auto-detect fails |
 | `MC_AUTH` | `offline` | `offline` or `microsoft` |
-| `LOGIN_MESSAGE` | — | Chat sent on spawn (e.g. `/login <pw>`); newline-separated for multi-step (e.g. `/register <pw> <pw>`⏎`/login <pw>`) — **editable live in the dashboard** |
+| `LOGIN_MESSAGE` | — | Sent on join to authenticate (e.g. `/login <pw>`); two-step via `&&` or newline (e.g. `/register <pw> <pw> && /login <pw>`) — **editable live in the dashboard** |
 | `DISPATCHER_NAME` | `agents` | Username of the always-on dispatcher players tag |
 | `BOT_COUNT` | `0` | Optional pre-spawned workers `agent_1`..`agent_N` (usually 0 — summon on demand) |
 | `BOTS_CONFIG` | — | Path to a JSON array of `{goal?, model?}` for pre-spawned workers; numbered `agent_1`.. by array order |

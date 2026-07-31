@@ -51,18 +51,22 @@ export function safeQuit(bot: any): void {
   }
 }
 
-const AUTH_PROMPT = /not authenticated|please (log ?in|login)|use \/login|\/l to auth|you have to (login|register)|register (first|to)/i;
+const AUTH_PROMPT = /not authenticated|please (log ?in|login)|use \/login|\/l to auth|you have to (login|register)|register (first|to)|not logged in/i;
+const AUTH_OK = /logged in|login successful|authentication successful|successfully (logged|registered|authenticated)|welcome back|session restored/i;
+const AUTH_FAIL = /wrong password|incorrect|invalid password|not registered|must register|password.*(short|long|weak)|too many|max.*accounts/i;
 
 /**
  * Authenticate after spawn: send the login message(s) on spawn AND whenever the
- * server prints an auth prompt. `getMessage` is read live; newline-separated lines
- * are sent in order (e.g. "/register <pw> <pw>\n/login <pw>").
+ * server prints an auth prompt, stopping once the server confirms success.
+ * `getMessage` is read live; newline-separated lines are sent in order
+ * (e.g. "/register <pw> <pw>\n/login <pw>" handles both fresh and existing accounts).
  */
 export function installAuth(bot: Bot, getMessage: () => string, note: (m: string) => void): void {
   let sent = 0;
-  let spawned = false;
+  let done = false;
   const send = (prompted: boolean): void => {
-    const lines = getMessage().split("\n").map((s) => s.trim()).filter(Boolean);
+    if (done) return;
+    const lines = getMessage().split(/\n|\s+&&\s+/).map((s) => s.trim()).filter(Boolean);
     if (!lines.length) {
       note(prompted ? "server requires login but none is configured — set it in the dashboard" : "no login message configured");
       return;
@@ -70,14 +74,20 @@ export function installAuth(bot: Bot, getMessage: () => string, note: (m: string
     sent++;
     lines.forEach((line, i) =>
       setTimeout(() => {
+        if (done) return;
         try { bot.chat(line); note(`sent login: ${line}`); }
         catch (e) { note(`login send failed: ${(e as Error).message}`); }
       }, i * 700),
     );
   };
-  bot.once("spawn", () => { spawned = true; setTimeout(() => send(false), 1000); });
+  // Login plugins hold the bot in limbo (no "spawn") until authenticated, so send on
+  // "login" (fires on join, pre-spawn) and on the auth prompt — never gated on spawn.
+  bot.once("login", () => { setTimeout(() => send(false), 500); });
   (bot as any).on("messagestr", (m: string) => {
-    if (spawned && sent < 5 && AUTH_PROMPT.test(String(m))) send(true);
+    const s = String(m);
+    if (!done && AUTH_OK.test(s)) { done = true; note("authenticated ✓"); return; }
+    if (AUTH_FAIL.test(s)) { note(`auth rejected: ${s.slice(0, 120)}`); return; }
+    if (!done && sent < 6 && AUTH_PROMPT.test(s)) send(true);
   });
 }
 
