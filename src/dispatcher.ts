@@ -1,6 +1,6 @@
 import type { Bot } from "mineflayer";
 import type { BatchResult, CreateResult, McConfig } from "./types.js";
-import { Reconnector, installAuth, logLine, logServerMessages, mineflayer, safeQuit, socketBytes } from "./deps.js";
+import { Reconnector, antiAfk, installAuth, kickReason, logLine, logServerMessages, mineflayer, safeQuit, socketBytes } from "./deps.js";
 
 export interface DispatchHandlers {
   createNew: (count: number, goal: string, owner: string) => CreateResult;
@@ -36,6 +36,7 @@ export class Dispatcher {
   private bot: Bot | null = null;
   private stopped = false;
   private live = false; // true from connect until "end" (covers the pre-spawn limbo state)
+  private stopAfk: (() => void) | null = null;
   private mcInBase = 0;
   private mcOutBase = 0;
   private readonly log: string[] = [];
@@ -73,16 +74,17 @@ export class Dispatcher {
     bot.once("spawn", () => {
       this.reconnector.markConnected();
       this.note("dispatcher online");
-      // Authenticate first; the spectator command is a no-op without permission.
-      setTimeout(() => bot.chat("/gamemode spectator"), 4000);
+      this.stopAfk = antiAfk(bot); // idle spectator would otherwise be AFK-kicked
     });
     logServerMessages(bot, (m) => this.note(m));
     installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onChat(username, message));
-    bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));
+    bot.on("kicked", (reason) => this.note(`kicked: ${kickReason(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
       this.live = false;
+      this.stopAfk?.();
+      this.stopAfk = null;
       if (this.stopped) return;
       const delay = this.reconnector.scheduleReconnect(() => !this.stopped);
       if (delay) this.note(`disconnected; reconnecting in ${delay / 1000}s`);

@@ -3,7 +3,7 @@ import type { Bot } from "mineflayer";
 import type { AgentState, AgentStatus, BotSpec, LlmConfig, McConfig } from "./types.js";
 import type { Pos, SkillContext, SkillEnv } from "./skillkit.js";
 import { TOOLS, execute, installAutoBehaviors, observe, summarizeResult } from "./skills.js";
-import { Movements, Reconnector, collectBlock, installAuth, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, socketBytes } from "./deps.js";
+import { Movements, Reconnector, collectBlock, installAuth, kickReason, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, socketBytes } from "./deps.js";
 
 const SYSTEM = `You control a single Minecraft bot through a fixed set of skills (tools).
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
@@ -131,7 +131,7 @@ export class Agent {
     installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onOwnerChat(username, message));
     bot.on("whisper", (username, message) => this.onWhisper(username, message));
-    bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));
+    bot.on("kicked", (reason) => this.note(`kicked: ${kickReason(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
       this.live = false;

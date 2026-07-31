@@ -91,6 +91,31 @@ export function installAuth(bot: Bot, getMessage: () => string, note: (m: string
   });
 }
 
+function flattenComponent(c: any): string {
+  if (c == null) return "";
+  if (typeof c === "string") return c;
+  let s = String(c.text ?? c.translate ?? "");
+  if (Array.isArray(c.extra)) s += c.extra.map(flattenComponent).join("");
+  if (Array.isArray(c.with)) s += " " + c.with.map(flattenComponent).join(" ");
+  return s.trim() || JSON.stringify(c);
+}
+
+/** Readable text from a kick/disconnect reason (string, JSON string, or chat component). */
+export function kickReason(reason: any): string {
+  if (typeof reason === "string") {
+    try { return flattenComponent(JSON.parse(reason)); } catch { return reason; }
+  }
+  return flattenComponent(reason);
+}
+
+/** Keep an idle bot from being AFK-kicked: nudge its view periodically. Returns a stop fn. */
+export function antiAfk(bot: Bot, ms = 15000): () => void {
+  const id = setInterval(() => {
+    try { void bot.look(((bot.entity?.yaw ?? 0) + 0.1) % (Math.PI * 2), 0, false)?.catch(() => {}); } catch { /* not spawned */ }
+  }, ms);
+  return () => clearInterval(id);
+}
+
 /** Mirror server/system chat into a log so auth prompts and rejections are visible. */
 export function logServerMessages(bot: Bot, note: (m: string) => void): void {
   (bot as any).on("messagestr", (message: string) => {
