@@ -3,7 +3,7 @@ import type { Bot } from "mineflayer";
 import type { AgentState, AgentStatus, BotSpec, LlmConfig, McConfig } from "./types.js";
 import type { Pos, SkillContext, SkillEnv } from "./skillkit.js";
 import { TOOLS, execute, installAutoBehaviors, observe, summarizeResult } from "./skills.js";
-import { Movements, Reconnector, collectBlock, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, sendLogin, socketBytes } from "./deps.js";
+import { Movements, Reconnector, collectBlock, installAuth, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, socketBytes } from "./deps.js";
 
 const SYSTEM = `You control a single Minecraft bot through a fixed set of skills (tools).
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
@@ -123,12 +123,10 @@ export class Agent {
       this.reconnector.markConnected();
       this.note(`spawned as ${this.spec.username}`);
       // Authenticate first, then act — starting the loop before login lands gets the bot kicked.
-      if (this.mc.loginMessage) {
-        sendLogin(bot, this.mc.loginMessage, (m) => this.note(m));
-        if (this.goal) setTimeout(() => void this.runLoop(), 2500);
-      } else if (this.goal) void this.runLoop();
+      if (this.goal) setTimeout(() => void this.runLoop(), this.mc.loginMessage ? 3000 : 0);
     });
     logServerMessages(bot, (m) => this.note(m));
+    installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onOwnerChat(username, message));
     bot.on("whisper", (username, message) => this.onWhisper(username, message));
     bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));

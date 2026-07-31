@@ -1,6 +1,6 @@
 import type { Bot } from "mineflayer";
 import type { BatchResult, CreateResult, McConfig } from "./types.js";
-import { Reconnector, logLine, logServerMessages, mineflayer, safeQuit, sendLogin, socketBytes } from "./deps.js";
+import { Reconnector, installAuth, logLine, logServerMessages, mineflayer, safeQuit, socketBytes } from "./deps.js";
 
 export interface DispatchHandlers {
   createNew: (count: number, goal: string, owner: string) => CreateResult;
@@ -72,10 +72,10 @@ export class Dispatcher {
       this.reconnector.markConnected();
       this.note("dispatcher online");
       // Authenticate first; the spectator command is a no-op without permission.
-      sendLogin(bot, this.mc.loginMessage, (m) => this.note(m));
-      setTimeout(() => bot.chat("/gamemode spectator"), 3000);
+      setTimeout(() => bot.chat("/gamemode spectator"), 4000);
     });
     logServerMessages(bot, (m) => this.note(m));
+    installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onChat(username, message));
     bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
