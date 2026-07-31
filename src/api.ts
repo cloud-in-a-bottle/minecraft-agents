@@ -26,16 +26,25 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   header button:disabled { background:#21262d; color:#6e7681; border-color:#2b333d; cursor:default; }
   .conn { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; }
   .conn.on{background:#3fb950} .conn.off{background:#f85149}
+  #rows tr { cursor:pointer; }
+  .clickable { cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px; }
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; z-index:10; }
+  #overlay.show { display:block; }
+  #detail { position:absolute; top:0; right:0; width:min(640px,100%); height:100%; background:#0e1116; border-left:1px solid #232a34; display:flex; flex-direction:column; }
+  #detail .dhead { padding:10px 14px; border-bottom:1px solid #232a34; display:flex; gap:12px; align-items:baseline; }
+  #detail .dhead b { color:#fff; font-size:14px; } #detail .dhead .x { margin-left:auto; cursor:pointer; color:#8b97a6; font-size:18px; }
+  #dlog { flex:1; overflow-y:auto; margin:0; padding:10px 14px; white-space:pre-wrap; word-break:break-word; font-size:12px; color:#c2ccd6; }
+  #dlog .srv{color:#d29922} #dlog .err{color:#f85149} #dlog .tool{color:#7ee787} #dlog .think{color:#a5a5ff}
 </style>
 <header>
   <b>minecraft-agents</b>
-  <span class=stat><span id=conn class="conn off"></span><span id=disp>connecting…</span></span>
+  <span class=stat><span id=conn class="conn off"></span><span id=disp class=clickable title="view dispatcher log">connecting…</span></span>
   <span class=stat>agents <span id=total>0</span></span>
   <span class=stat>active <span id=active>0</span></span>
   <span class=stat>tokens <span id=tok>0</span></span>
   <span class=stat>traffic <span id=net>0</span></span>
   <span class=stat>server <input id=host placeholder=host style="width:200px"> : <input id=port type=number style="width:78px"></span>
-  <span class=stat>login <input id=login type=password placeholder="/login <pw>" style="width:150px" title="sent in chat on spawn"></span>
+  <span class=stat>login <input id=login type=text placeholder="/login <pw>" style="width:150px" title="sent in chat on spawn; use newlines for multi-step, e.g. /register then /login"></span>
   <button id=apply disabled title="reconnects the fleet">apply</button>
   <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon, no restart"></span>
   <span class=stat muted id=upd></span>
@@ -44,6 +53,10 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   <thead><tr><th>agent</th><th>owner</th><th>state</th><th>goal</th><th>step</th><th>conv</th><th>tok in/out</th><th>cache</th><th>net ↓/↑</th><th>hp/food</th></tr></thead>
   <tbody id=rows></tbody>
 </table></div>
+<div id=overlay><div id=detail>
+  <div class=dhead><b id=dname></b><span id=dstate class=muted></span><span class=x id=dclose>×</span></div>
+  <pre id=dlog></pre>
+</div></div>
 <script>
 const k = n => n>=1000 ? (n/1000).toFixed(n>=10000?0:1)+'k' : String(n||0);
 const fb = n => { n=n||0; if(n>=1e9)return (n/1e9).toFixed(2)+'GB'; if(n>=1e6)return (n/1e6).toFixed(1)+'MB'; if(n>=1e3)return (n/1e3).toFixed(0)+'KB'; return n+'B'; };
@@ -64,6 +77,32 @@ applyEl.addEventListener('click', async () => {
   if (r && r.ok) { dirty = false; applyEl.textContent = 'applied'; }
   else { applyEl.disabled = false; applyEl.textContent = 'failed'; }
 });
+// ---- detail panel: click an agent (or the dispatcher) to read its log/conversation ----
+let selected = null; // agent username, or '__dispatcher__'
+const overlay = document.getElementById('overlay'), dlog = document.getElementById('dlog');
+const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const lineClass = l => l.includes(' srv: ')?'srv' : /error|kicked|gave up|failed/.test(l)?'err' : l.includes(' thinks: ')?'think' : /\s->\s/.test(l)?'tool' : '';
+function openDetail(name){ selected = name; overlay.classList.add('show'); renderDetail(true); }
+function closeDetail(){ selected = null; overlay.classList.remove('show'); }
+document.getElementById('dclose').addEventListener('click', closeDetail);
+overlay.addEventListener('click', e => { if (e.target === overlay) closeDetail(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+document.getElementById('rows').addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-name]'); if (tr) openDetail(tr.dataset.name);
+});
+document.getElementById('disp').addEventListener('click', () => openDetail('__dispatcher__'));
+async function renderDetail(reset){
+  if (selected == null) return;
+  const isDisp = selected === '__dispatcher__';
+  const s = await fetch(isDisp ? '/dispatcher' : '/bots/'+encodeURIComponent(selected)).then(r=>r.json()).catch(()=>null);
+  if (selected == null) return;
+  document.getElementById('dname').textContent = isDisp ? (s&&s.username||'dispatcher') : selected;
+  document.getElementById('dstate').textContent = s ? (isDisp ? (s.online?'connected':'disconnected') : (s.state||'') + (s.goal?(' — '+s.goal):'')) : 'unavailable';
+  const log = (s&&s.log)||[];
+  const atBottom = dlog.scrollHeight - dlog.scrollTop - dlog.clientHeight < 40;
+  dlog.innerHTML = log.map(l => '<span class="'+lineClass(l)+'">'+esc(l)+'</span>').join('\\n') || '<span class=muted>no activity yet</span>';
+  if (reset || atBottom) dlog.scrollTop = dlog.scrollHeight;
+}
 async function tick(){
   try {
     const [bots, disp, cfg] = await Promise.all([
@@ -91,7 +130,7 @@ async function tick(){
     document.getElementById('rows').innerHTML = bots.map(b => {
       const hp = b.health==null?'—':Math.round(b.health), food = b.food==null?'—':Math.round(b.food);
       const g = b.goal ? b.goal.replace(/</g,'&lt;') : '<span class=muted>—</span>';
-      return '<tr>'+
+      return '<tr data-name="'+b.username+'">'+
         '<td class=name><span class="dot '+b.state+'"></span>'+b.username+'</td>'+
         '<td class=owner>'+(b.owner||'<span class=muted>unowned</span>')+'</td>'+
         '<td>'+b.state+'</td>'+
@@ -104,6 +143,7 @@ async function tick(){
         '<td class=num>'+hp+' / '+food+'</td>'+
       '</tr>';
     }).join('') || '<tr><td colspan=10 class=muted>no agents — summon with @agents in game, or POST /summon</td></tr>';
+    if (selected != null) renderDetail(false);
   } catch (e) { document.getElementById('upd').textContent = 'error'; }
 }
 tick(); setInterval(tick, 1500);

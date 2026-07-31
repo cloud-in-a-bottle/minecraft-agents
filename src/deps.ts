@@ -51,7 +51,55 @@ export function safeQuit(bot: any): void {
   }
 }
 
-/** Send a configured login/chat message shortly after spawn (e.g. "/login <pw>"). */
+/**
+ * Send the configured login message(s) shortly after spawn (e.g. "/login <pw>").
+ * Newline-separated lines are sent in order (e.g. "/register <pw> <pw>\n/login <pw>").
+ */
 export function sendLogin(bot: Bot, message: string): void {
-  setTimeout(() => bot.chat(message), 1000);
+  const lines = message.split("\n").map((s) => s.trim()).filter(Boolean);
+  lines.forEach((line, i) => setTimeout(() => bot.chat(line), 1000 + i * 700));
+}
+
+/** Mirror server/system chat into a log so auth prompts and rejections are visible. */
+export function logServerMessages(bot: Bot, note: (m: string) => void): void {
+  (bot as any).on("messagestr", (message: string) => {
+    const s = String(message).trim();
+    if (s) note(`srv: ${s.slice(0, 180)}`);
+  });
+}
+
+/**
+ * Backed-off reconnect with an attempt cap, shared by the dispatcher and workers.
+ * A connection that stays up long enough resets the backoff; too many quick failures give up.
+ */
+export class Reconnector {
+  private attempts = 0;
+  private stableTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly maxAttempts: number,
+    private readonly onReconnect: () => void,
+    private readonly onGiveUp: (attempts: number) => void,
+  ) {}
+
+  /** Call once a connection is live; if it survives `stableMs`, the backoff resets. */
+  markConnected(stableMs = 20000): void {
+    if (this.stableTimer) clearTimeout(this.stableTimer);
+    this.stableTimer = setTimeout(() => (this.attempts = 0), stableMs);
+  }
+
+  /** Call from "end". Reconnects after a growing delay (capped 30s) if `shouldReconnect`, else gives up. */
+  scheduleReconnect(shouldReconnect: () => boolean): number {
+    if (this.stableTimer) { clearTimeout(this.stableTimer); this.stableTimer = null; }
+    this.attempts++;
+    if (this.attempts > this.maxAttempts) { this.onGiveUp(this.attempts); return 0; }
+    const delay = Math.min(30000, 2000 * 2 ** (this.attempts - 1));
+    setTimeout(() => { if (shouldReconnect()) this.onReconnect(); }, delay);
+    return delay;
+  }
+
+  reset(): void {
+    this.attempts = 0;
+    if (this.stableTimer) { clearTimeout(this.stableTimer); this.stableTimer = null; }
+  }
 }

@@ -37,7 +37,7 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `MC_PORT` | `25565` | Server port — **also editable live in the dashboard** |
 | `MC_VERSION` | auto | Pin if auto-detect fails |
 | `MC_AUTH` | `offline` | `offline` or `microsoft` |
-| `LOGIN_MESSAGE` | — | Chat sent on spawn (e.g. `/login <pw>` for an offline server) — **also editable live in the dashboard** |
+| `LOGIN_MESSAGE` | — | Chat sent on spawn (e.g. `/login <pw>`); newline-separated for multi-step (e.g. `/register <pw> <pw>`⏎`/login <pw>`) — **editable live in the dashboard** |
 | `DISPATCHER_NAME` | `agents` | Username of the always-on dispatcher players tag |
 | `BOT_COUNT` | `0` | Optional pre-spawned workers `agent_1`..`agent_N` (usually 0 — summon on demand) |
 | `BOTS_CONFIG` | — | Path to a JSON array of `{goal?, model?}` for pre-spawned workers; numbered `agent_1`.. by array order |
@@ -77,9 +77,11 @@ step + conversation length, tokens in/out, cache-read tokens, **network in/out**
 and health/food, with dispatcher status, fleet token + **traffic** totals in the
 header. Traffic = real Minecraft socket bytes (on-wire) per bot + approximate API
 request/response bytes; summed across all workers and the dispatcher. The header
-also has **live-editable controls** — the Minecraft server host/port, the login
-message (e.g. `/login <pw>`), and the per-user cap — applied via `POST /config`
-with no restart (host/login changes reconnect the fleet). The **per-user cap is
+also has **live-editable controls** — the Minecraft server host/port and login
+message (staged, then **apply** together — this reconnects the fleet) and the
+per-user cap (inline). A colored dot shows whether the dispatcher is connected.
+**Click any row (or the dispatcher)** to open its log — spawn/kick reasons, server
+auth replies (`srv:`), and the step-by-step tool calls and results. The **per-user cap is
 editable inline** (header input → `POST /config`); it takes effect on the next
 summon with no restart and without disconnecting any running agent. Enforced for
 in-game players (owner `api`/HTTP admin is exempt); over-cap `new` requests are
@@ -131,7 +133,7 @@ each bot keeps loaded — not the bot process (see `RESEARCH.md` for measured
 figures, ~100 MB/online worker). `MAX_BOTS` caps concurrent *online* workers;
 raise `memory_mb`/`cpu_millicores` in `openhost.toml` alongside it. Workers
 logging out on task completion naturally frees memory and capacity. For many bots
-on one IP, raise the server's per-IP registration limit if using `BOT_PASSWORD`.
+on one IP, raise the server's per-IP join/registration limit for the auth plugin.
 
 ## Local dev
 

@@ -1,6 +1,6 @@
 import type { Bot } from "mineflayer";
 import type { BatchResult, CreateResult, McConfig } from "./types.js";
-import { logLine, mineflayer, safeQuit, sendLogin, socketBytes } from "./deps.js";
+import { Reconnector, logLine, logServerMessages, mineflayer, safeQuit, sendLogin, socketBytes } from "./deps.js";
 
 export interface DispatchHandlers {
   createNew: (count: number, goal: string, owner: string) => CreateResult;
@@ -38,6 +38,11 @@ export class Dispatcher {
   private mcInBase = 0;
   private mcOutBase = 0;
   private readonly log: string[] = [];
+  private readonly reconnector = new Reconnector(
+    8,
+    () => this.start(),
+    (n) => this.note(`gave up reconnecting after ${n} attempts (check host/login)`),
+  );
 
   constructor(
     private readonly username: string,
@@ -64,17 +69,20 @@ export class Dispatcher {
     });
     this.bot = bot;
     bot.once("spawn", () => {
+      this.reconnector.markConnected();
       this.note("dispatcher online");
+      // Authenticate first; the spectator command is a no-op without permission.
       if (this.mc.loginMessage) sendLogin(bot, this.mc.loginMessage);
-      bot.chat("/gamemode spectator"); // no-op without permission
+      setTimeout(() => bot.chat("/gamemode spectator"), 3000);
     });
+    logServerMessages(bot, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onChat(username, message));
     bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
       if (this.stopped) return;
-      this.note("disconnected; reconnecting in 5s");
-      setTimeout(() => this.start(), 5000);
+      const delay = this.reconnector.scheduleReconnect(() => !this.stopped);
+      if (delay) this.note(`disconnected; reconnecting in ${delay / 1000}s`);
     });
   }
 
@@ -151,12 +159,15 @@ export class Dispatcher {
 
   stop(): void {
     this.stopped = true;
+    this.reconnector.reset();
     safeQuit(this.bot);
   }
 
-  /** Reconnect to pick up a new host/login (the "end" handler reconnects). */
+  /** Reconnect to pick up a new host/login. Restart directly if it had given up. */
   reconnect(): void {
-    safeQuit(this.bot);
+    this.reconnector.reset();
+    if (this.bot?.entity) safeQuit(this.bot); // "end" handler reconnects with the current config
+    else this.start();
   }
 
   status(): { username: string; online: boolean; netIn: number; netOut: number; log: string[] } {

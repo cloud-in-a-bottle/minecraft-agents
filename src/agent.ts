@@ -3,7 +3,7 @@ import type { Bot } from "mineflayer";
 import type { AgentState, AgentStatus, BotSpec, LlmConfig, McConfig } from "./types.js";
 import type { Pos, SkillContext, SkillEnv } from "./skillkit.js";
 import { TOOLS, execute, installAutoBehaviors, observe, summarizeResult } from "./skills.js";
-import { Movements, collectBlock, logLine, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, sendLogin, socketBytes } from "./deps.js";
+import { Movements, Reconnector, collectBlock, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, sendLogin, socketBytes } from "./deps.js";
 
 const SYSTEM = `You control a single Minecraft bot through a fixed set of skills (tools).
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
@@ -42,6 +42,14 @@ export class Agent {
   private readonly injected: string[] = [];
   private readonly behaviors = new Set<string>();
   private readonly log: string[] = [];
+  private readonly reconnector = new Reconnector(
+    4,
+    () => this.start(),
+    (n) => {
+      this.state = "error";
+      this.note(`gave up reconnecting after ${n} attempts (check host/login)`);
+    },
+  );
 
   constructor(
     private readonly spec: BotSpec,
@@ -112,10 +120,15 @@ export class Agent {
       (bot as any)._behaviors = this.behaviors;
       installAutoBehaviors(bot, () => this.mcData, (name) => name === this.owner || /^agent_\d+$/i.test(name), () => this.makeCtx());
       this.state = "idle";
+      this.reconnector.markConnected();
       this.note(`spawned as ${this.spec.username}`);
-      if (this.mc.loginMessage) sendLogin(bot, this.mc.loginMessage);
-      if (this.goal) void this.runLoop();
+      // Authenticate first, then act — starting the loop before login lands gets the bot kicked.
+      if (this.mc.loginMessage) {
+        sendLogin(bot, this.mc.loginMessage);
+        if (this.goal) setTimeout(() => void this.runLoop(), 2500);
+      } else if (this.goal) void this.runLoop();
     });
+    logServerMessages(bot, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onOwnerChat(username, message));
     bot.on("whisper", (username, message) => this.onWhisper(username, message));
     bot.on("kicked", (reason) => this.note(`kicked: ${String(reason)}`));
@@ -123,8 +136,8 @@ export class Agent {
     bot.on("end", () => {
       if (this.stopped) return;
       this.state = "connecting";
-      this.note("disconnected; reconnecting in 5s");
-      setTimeout(() => this.start(), 5000);
+      const delay = this.reconnector.scheduleReconnect(() => !this.stopped);
+      if (delay) this.note(`disconnected; reconnecting in ${delay / 1000}s`);
     });
   }
 
@@ -159,6 +172,7 @@ export class Agent {
   markOffline(): void {
     this.stopped = true;
     this.state = "stopped";
+    this.reconnector.reset();
   }
 
   /** (Re)assign a goal. Reconnects if logged out. Rejected (false) while busy. */
@@ -170,8 +184,9 @@ export class Agent {
     this.goal = goal;
     this.note(`goal: ${goal}`);
     if (this.state === "idle") void this.runLoop();
-    else if (this.state === "stopped") {
+    else if (this.state === "stopped" || this.state === "error") {
       this.stopped = false;
+      this.reconnector.reset();
       this.start();
     }
     return true;
@@ -258,6 +273,7 @@ export class Agent {
         this.tokensOut += res.usage.output_tokens ?? 0;
         this.cacheRead += res.usage.cache_read_input_tokens ?? 0;
 
+        for (const b of res.content) if (b.type === "text" && b.text.trim()) this.note(`thinks: ${b.text.trim()}`);
         const calls = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
         if (calls.length === 0) break;
 
@@ -289,6 +305,7 @@ export class Agent {
   private logout(): void {
     this.stopped = true;
     this.state = "stopped";
+    this.reconnector.reset();
     safeQuit(this.bot);
     this.note("task finished; logged out");
   }
@@ -300,6 +317,7 @@ export class Agent {
   stop(): void {
     this.stopped = true;
     this.state = "stopped";
+    this.reconnector.reset();
     safeQuit(this.bot);
     this.note("stopped");
   }
@@ -308,10 +326,12 @@ export class Agent {
     return this.state !== "stopped";
   }
 
-  /** Reconnect an idle online bot (to pick up a new host/login). Skips busy ones. */
+  /** Reconnect an idle online bot (to pick up a new host/login). Skips busy/stopped ones. */
   reconnect(): void {
-    if (!this.isOnline() || this.looping) return;
-    safeQuit(this.bot); // "end" handler reconnects (stopped stays false) using the current mc config
+    if (this.state === "stopped" || this.looping) return;
+    this.reconnector.reset();
+    if (this.bot?.entity) safeQuit(this.bot); // "end" handler reconnects using the current mc config
+    else if (!this.stopped) this.start();
   }
 
   status(): AgentStatus {
@@ -331,7 +351,7 @@ export class Agent {
       health: this.bot?.health ?? null,
       food: this.bot?.food ?? null,
       position: p ? { x: Math.round(p.x), y: Math.round(p.y), z: Math.round(p.z) } : null,
-      log: this.log.slice(-20),
+      log: this.log.slice(-100),
     };
   }
 }
