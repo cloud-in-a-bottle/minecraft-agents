@@ -3,7 +3,7 @@ import type { Bot } from "mineflayer";
 import type { AgentState, AgentStatus, BotSpec, LlmConfig, McConfig } from "./types.js";
 import type { Pos, SkillContext, SkillEnv } from "./skillkit.js";
 import { TOOLS, execute, installAutoBehaviors, observe, summarizeResult } from "./skills.js";
-import { Movements, Reconnector, collectBlock, installAuth, kickReason, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, socketBytes } from "./deps.js";
+import { Movements, Reconnector, collectBlock, installAuth, kickReason, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, socketBytes, startChunkPrune } from "./deps.js";
 
 const SYSTEM = `You control a single Minecraft bot through a fixed set of skills (tools).
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
@@ -12,6 +12,7 @@ Rules:
 - Never invent coordinates — use find_blocks to locate things before moving or mining.
 - If a skill returns an error, try a different concrete approach rather than repeating it.
 - When the owner sends a message (shown as OWNER:) or asks a question, reply with whisper (private) or say_to (public @mention).
+- For repetitive work (gathering, crafting chains), save a routine once with save_routine, then run_routine to execute it without planning each step; check list_routines first to reuse one.
 - Call task_complete as soon as the goal is met or is clearly impossible.`;
 
 // Cached prefix: tools render before system, so a breakpoint here caches tools + system.
@@ -23,7 +24,6 @@ const SYSTEM_BLOCKS: Anthropic.TextBlockParam[] = [
 export class Agent {
   private bot: Bot | null = null;
   private mcData: any = null;
-  private client: Anthropic;
   private state: AgentState = "connecting";
   private goal: string | null;
   private step = 0;
@@ -57,8 +57,8 @@ export class Agent {
     private readonly llm: LlmConfig,
     public owner: string | null = null,
     private readonly env: SkillEnv,
+    private readonly client: Anthropic, // one shared client for the whole fleet
   ) {
-    this.client = new Anthropic({ apiKey: llm.apiKey });
     this.goal = spec.goal ?? null;
   }
 
@@ -68,6 +68,7 @@ export class Agent {
       mcData: this.mcData,
       memory: this.env.memory,
       peers: this.env.peers,
+      routines: this.env.routines,
       self: { username: this.spec.username, owner: this.owner },
       behaviors: this.behaviors,
     };
@@ -110,6 +111,7 @@ export class Agent {
       username: this.spec.username,
       version: this.mc.version,
       auth: this.mc.auth,
+      viewDistance: this.mc.viewDistance,
     });
     bot.loadPlugin(pathfinder);
     bot.loadPlugin(collectBlock);
@@ -119,8 +121,14 @@ export class Agent {
     bot.once("spawn", () => {
       this.mcData = mcDataLoader(bot.version);
       bot.pathfinder.setMovements(new Movements(bot));
+      // A* is synchronous on the shared event loop; keep each bot's slice small so
+      // concurrent bots don't starve each other, and bound runaway searches.
+      bot.pathfinder.tickTimeout = 10; // ms/tick spent pathfinding (default 40)
+      bot.pathfinder.thinkTimeout = 3000; // give up a single search sooner (default 5000)
+      (bot.pathfinder as any).searchRadius = 128; // don't A* the whole world for far/blocked goals
       (bot as any)._behaviors = this.behaviors;
       installAutoBehaviors(bot, () => this.mcData, (name) => name === this.owner || /^agent_\d+$/i.test(name), () => this.makeCtx());
+      startChunkPrune(bot, this.mc.chunkKeepRadius);
       this.state = "idle";
       this.reconnector.markConnected();
       this.note(`spawned as ${this.spec.username}`);
@@ -240,7 +248,9 @@ export class Agent {
     this.convSteps = 0;
     const model = this.spec.model ?? this.llm.model;
     const goal = this.goal;
-    type Step = { assistant: Anthropic.ContentBlock[]; results: { id: string; name: string; full: string }[] };
+    // `content` holds the full result while recent, then is replaced in place by its summary
+    // once the step leaves the KEEP_FULL window — the full string is dropped, not retained.
+    type Step = { assistant: Anthropic.ContentBlock[]; results: { id: string; name: string; content: string }[]; collapsed: boolean };
     const history: Step[] = [];
     const KEEP_FULL = 4; // recent steps keep full results; older collapse to summaries
 
@@ -254,11 +264,10 @@ export class Agent {
         history.forEach((rec, i) => {
           msgs.push({ role: "assistant", content: rec.assistant });
           const isLast = i === history.length - 1;
-          const keepFull = i >= history.length - KEEP_FULL;
           const results: Anthropic.ToolResultBlockParam[] = rec.results.map((r) => ({
             type: "tool_result",
             tool_use_id: r.id,
-            content: keepFull ? r.full : summarizeResult(r.name, r.full),
+            content: r.content,
           }));
           msgs.push({ role: "user", content: isLast ? [...results, { type: "text", text: `CURRENT STATE:\n${this.stateText()}` }] : results });
         });
@@ -289,9 +298,16 @@ export class Agent {
         for (const call of calls) {
           const out = await execute(this.bot, this.mcData, call.name, call.input as Record<string, any>, this.makeCtx());
           this.note(`${call.name} -> ${out}`);
-          results.push({ id: call.id, name: call.name, full: out });
+          results.push({ id: call.id, name: call.name, content: out });
         }
-        history.push({ assistant: res.content, results });
+        history.push({ assistant: res.content, results, collapsed: false });
+        // Collapse steps that fell out of the full-keep window: replace full output with its summary, drop the rest.
+        for (let i = 0; i < history.length - KEEP_FULL; i++) {
+          const rec = history[i];
+          if (rec.collapsed) continue;
+          for (const r of rec.results) r.content = summarizeResult(r.name, r.content);
+          rec.collapsed = true;
+        }
         this.convSteps = history.length;
       }
       if (this.step >= this.llm.maxSteps) this.note("stopped: step budget exhausted");

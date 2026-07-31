@@ -121,6 +121,23 @@ turned off. Persists across a worker's reconnects.
 | `say_to` | `player, message` | Public chat addressed `@<player>` |
 | `whisper` | `player, message` | Private `/msg` to a player |
 
+## Routines (self-authored procedures)
+
+Reusable, saved procedures the planner composes from the skills above — for
+repetitive work (gathering, crafting chains) it authors one, then replays it with
+**no per-step LLM calls**. Steps are interpreted data, not code (no `eval`), and
+may only call whitelisted skills. Saved per owner in SQLite, shared across that
+owner's agents. Execution is bounded by a step budget (300) and a 5-minute deadline.
+
+| Tool | Inputs | Does |
+|---|---|---|
+| `save_routine` | `name, description, steps` | Store a procedure. A step is `{tool,args}`, `{repeat:N,do:[…]}`, `{until:"<cond>",max:N,do:[…]}`, or `{when:"<cond>",do:[…],else:[…]}`; `{param}` placeholders in args/conditions |
+| `run_routine` | `name, args` | Run a saved routine, filling `{param}` from `args` (nesting ≤3) |
+| `list_routines` | — | List saved routines to reuse |
+
+Conditions: `have:<item><op>N`, `find:<block><op>N`, `health<op>N`, `food<op>N`
+(op ∈ `>= <= > < == !=`), evaluated against live inventory/surroundings.
+
 ## Control
 
 | Tool | Inputs | Does |

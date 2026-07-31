@@ -34,6 +34,31 @@ export function socketBytes(bot: any): { in: number; out: number } {
   return { in: s?.bytesRead ?? 0, out: s?.bytesWritten ?? 0 };
 }
 
+/**
+ * Cap a bot's world copy: periodically drop loaded columns beyond `keepRadius`
+ * chunks of the bot, reclaiming chunks the server never told it to unload (#1123).
+ * `keepRadius` must be ≥ the server view-distance or blocks near the bot go missing.
+ */
+export function startChunkPrune(bot: any, keepRadius: number, intervalMs = 45000): void {
+  const timer = setInterval(() => {
+    try {
+      const p = bot.entity?.position;
+      const world = bot.world;
+      if (!p || !world?.getColumns) return;
+      const cx = Math.floor(p.x) >> 4;
+      const cz = Math.floor(p.z) >> 4;
+      for (const col of world.getColumns()) {
+        const x = Number(col.chunkX); // getColumns() yields string coords
+        const z = Number(col.chunkZ);
+        if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) > keepRadius) world.unloadColumn(x, z);
+      }
+    } catch {
+      /* transient; retry next tick */
+    }
+  }, intervalMs);
+  bot.once("end", () => clearInterval(timer));
+}
+
 /** Append to a capped ring-buffer log. */
 export function logLine(log: string[], msg: string): void {
   log.push(`${new Date().toISOString()} ${msg}`);

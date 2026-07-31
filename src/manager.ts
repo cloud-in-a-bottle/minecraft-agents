@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { Agent } from "./agent.js";
 import { Dispatcher } from "./dispatcher.js";
 import { type PeerApi, type SkillEnv } from "./skillkit.js";
@@ -9,12 +10,14 @@ export class BotManager {
   private readonly agents = new Map<string, Agent>();
   private readonly dispatcher: Dispatcher;
   private readonly env: SkillEnv;
+  private readonly client: Anthropic; // one client shared by the whole fleet
   private nextNumber: number;
   private maxPerUser: number;
 
   constructor(private readonly config: AppConfig, private readonly store: Store) {
     this.loadSettings(); // durable settings override the env-var seed
     this.maxPerUser = config.maxPerUser;
+    this.client = new Anthropic({ apiKey: config.llm.apiKey });
     const peers: PeerApi = {
       position: (name) => this.agents.get(name)?.position() ?? null,
       online: (name) => !!this.agents.get(name)?.isOnline(),
@@ -26,7 +29,7 @@ export class BotManager {
       },
       summon: (count, goal, owner) => this.createNew(count, goal, owner),
     };
-    this.env = { memory: store, peers };
+    this.env = { memory: store, peers, routines: store };
     this.dispatcher = new Dispatcher(config.dispatcherName, config.mc, config.commandAllowlist, {
       createNew: (count, goal, owner) => this.createNew(count, goal, owner),
       assignExisting: (nums, goal, owner) => this.assignExisting(nums, goal, owner),
@@ -63,7 +66,7 @@ export class BotManager {
   }
 
   private create(spec: BotSpec, owner: string | null): Agent {
-    const agent = new Agent(spec, this.config.mc, this.config.llm, owner, this.env);
+    const agent = new Agent(spec, this.config.mc, this.config.llm, owner, this.env, this.client);
     this.agents.set(spec.username, agent);
     return agent;
   }
@@ -76,6 +79,7 @@ export class BotManager {
 
   startAll(): void {
     this.dispatcher.start();
+    this.dispatcher.enableRecycle(this.config.dispatcherRecycleMs);
     for (const agent of this.agents.values()) agent.start();
   }
 

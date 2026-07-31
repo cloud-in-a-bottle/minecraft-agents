@@ -14,6 +14,10 @@ export interface McConfig {
   auth: AuthMode;
   /** Sent in chat on spawn if non-empty (e.g. "/login <pw>" for an offline server). Live-editable. */
   loginMessage: string;
+  /** Client view-distance ("tiny".."far" or chunk count); honored only by servers with per-player view-distance. */
+  viewDistance?: string | number;
+  /** Drop loaded columns beyond this many chunks of the bot to cap the roaming world-copy leak. */
+  chunkKeepRadius: number;
 }
 
 export interface LlmConfig {
@@ -45,6 +49,8 @@ export interface AppConfig {
   maxBots: number;
   /** Cap on online workers a single owner may hold (0 = unlimited). Live-editable. */
   maxPerUser: number;
+  /** Interval (ms) to recycle the always-on dispatcher to reset its chunk memory; 0 disables. */
+  dispatcherRecycleMs: number;
 }
 
 export interface SpawnResult {

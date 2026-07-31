@@ -201,6 +201,28 @@ Measured live via the dashboard: real MC socket bytes (`net.Socket.bytesRead/
 bytesWritten`, on-wire/compressed) per bot + approximate API JSON bytes, summed
 fleet-wide. Estimates above are unverified; confirm with the dashboard totals.
 
+## Existing skill libraries — reuse vs. build (2026 check)
+
+No polished, typed, `npm install`-able skill library exists for a Mineflayer/TS app today.
+Closest reusable catalogs:
+
+- **Mindcraft** (kolbytn/mindcraft, MIT) — ~47 hand-written `fn(bot, …)` JS skills + a `world.js`
+  query lib. Fixed library; optional insecure coding mode runs generated JS in an SES compartment
+  (off by default). Maps almost 1:1 to our ~46-skill set — the best coverage checklist.
+- **Voyager** (MineDojo, MIT) — not a library but a *generation pipeline*: the LLM writes async JS
+  Mineflayer functions, self-verifies, and stores them in an embedding-indexed store for retrieval.
+  Runs generated code **unsandboxed** (`eval`) — a code-injection surface, unacceptable here since
+  our bots read untrusted public chat.
+- **Odyssey** (zju-vipa, code MIT / dataset CC-BY-NC-SA) — largest curated set (40 primitive + 183
+  compositional skills) but entangled with Python + a fine-tuned LLaMA-3; port piecemeal at best.
+- **Project Sid** (Altera) — report/paper only, no code released.
+
+**Decision:** keep our fixed, hand-authored skill set (reliability, Mindcraft model) and add safe
+runtime **composition** instead of Voyager-style code-gen. Implemented as *routines* — saved,
+parameterized procedures (sequence + `repeat`/`until`/`when`) interpreted over the whitelisted
+skills, persisted per owner in SQLite. No `eval`, bounded by step/time budgets. See `TOOLS.md` →
+Routines and `src/routines.ts`.
+
 ## Open questions
 
 1. Quantified limits — end-to-end latency, API $/task, hallucination/grounding failure rates,

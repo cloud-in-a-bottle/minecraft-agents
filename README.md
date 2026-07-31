@@ -47,6 +47,9 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `COMMAND_ALLOWLIST` | — | Comma-separated usernames allowed to command `@<dispatcher>`; empty = anyone |
 | `MAX_BOTS` | `20` | Cap on concurrent **online** workers (logged-out ones don't count) |
 | `MAX_PER_USER` | `5` | Cap on online workers one player may own (0 = unlimited). Live-editable in the dashboard |
+| `MC_VIEW_DISTANCE` | server default | Worker view-distance (`tiny`..`far` or chunk count); cuts per-bot RAM **only** on servers with per-player view-distance (Paper/Folia). The dispatcher always uses `tiny` |
+| `CHUNK_KEEP_RADIUS` | `12` | Drop each bot's loaded chunks beyond this radius to cap the roaming world-copy leak. **Must be ≥ the server's view-distance** or blocks near the bot go missing |
+| `DISPATCHER_RECYCLE_MIN` | `45` | Minutes between dispatcher reconnects to reset its accumulated chunk memory (it never logs out); `0` disables |
 | `PORT` | `8080` | HTTP port (matches `openhost.toml`) |
 | `DB_PATH` | `$OPENHOST_APP_DATA_DIR/minecraft-agents.db` | SQLite file for persisted state; falls back to `$DATA_DIR` then `./data` locally |
 
@@ -138,6 +141,17 @@ figures, ~100 MB/online worker). `MAX_BOTS` caps concurrent *online* workers;
 raise `memory_mb`/`cpu_millicores` in `openhost.toml` alongside it. Workers
 logging out on task completion naturally frees memory and capacity. For many bots
 on one IP, raise the server's per-IP join/registration limit for the auth plugin.
+
+**Bot-side lag** (jerky movement while the server is fine) is single-thread
+contention: Node runs *all* bots on one event loop, so pathfinding (synchronous
+A\*), 20 Hz physics, and chunk/entity packets compete for one thread — extra CPU
+cores don't help JS. Mitigations already applied: pathfinding is capped per bot
+(`tickTimeout` 10 ms/tick, bounded `searchRadius`) so concurrent A\* can't starve
+other bots, the dispatcher runs with physics off + `tiny` view, and each bot prunes
+its chunk copy (`CHUNK_KEEP_RADIUS`). To cut it further, lower `MC_VIEW_DISTANCE`
+(on Paper/Folia) and keep fewer workers online at once. Past ~8–12 active workers
+the fix is **horizontal**: run additional app instances, each driving a subset —
+one event loop can only do so much.
 
 ## Persistence
 

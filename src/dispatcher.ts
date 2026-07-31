@@ -1,6 +1,6 @@
 import type { Bot } from "mineflayer";
 import type { BatchResult, CreateResult, McConfig } from "./types.js";
-import { Reconnector, antiAfk, installAuth, kickReason, logLine, logServerMessages, mineflayer, safeQuit, socketBytes } from "./deps.js";
+import { Reconnector, antiAfk, installAuth, kickReason, logLine, logServerMessages, mineflayer, safeQuit, socketBytes, startChunkPrune } from "./deps.js";
 
 export interface DispatchHandlers {
   createNew: (count: number, goal: string, owner: string) => CreateResult;
@@ -36,6 +36,7 @@ export class Dispatcher {
   private bot: Bot | null = null;
   private stopped = false;
   private stopAfk: (() => void) | null = null;
+  private recycleTimer: ReturnType<typeof setInterval> | null = null;
   private mcInBase = 0;
   private mcOutBase = 0;
   private readonly log: string[] = [];
@@ -69,12 +70,15 @@ export class Dispatcher {
       username: this.username,
       version: this.mc.version,
       auth: this.mc.auth,
+      viewDistance: "tiny", // spectator needs only chat, not the world
+      physicsEnabled: false, // never moves; skip the physics tick
     });
     this.bot = bot;
     bot.once("spawn", () => {
       this.reconnector.markConnected();
       this.note("dispatcher online");
       this.stopAfk = antiAfk(bot); // idle spectator would otherwise be AFK-kicked
+      startChunkPrune(bot, this.mc.chunkKeepRadius);
     });
     logServerMessages(bot, (m) => this.note(m));
     installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
@@ -166,6 +170,7 @@ export class Dispatcher {
   stop(): void {
     this.stopped = true;
     this.reconnector.reset();
+    if (this.recycleTimer) { clearInterval(this.recycleTimer); this.recycleTimer = null; }
     safeQuit(this.bot);
   }
 
@@ -173,6 +178,16 @@ export class Dispatcher {
   reconnect(): void {
     this.reconnector.reset();
     this.start();
+  }
+
+  /** Periodically reconnect to reset the always-on bot's accumulated chunk memory (0 disables). */
+  enableRecycle(intervalMs: number): void {
+    if (intervalMs <= 0 || this.recycleTimer) return;
+    this.recycleTimer = setInterval(() => {
+      if (this.stopped || !this.bot?.entity) return;
+      this.note("scheduled recycle (reset chunk memory)");
+      this.reconnect();
+    }, intervalMs);
   }
 
   status(): { username: string; online: boolean; netIn: number; netOut: number; log: string[] } {

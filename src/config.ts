@@ -39,12 +39,15 @@ function resolveBots(): BotSpec[] {
 }
 
 export function loadConfig(): AppConfig {
+  const vd = process.env.MC_VIEW_DISTANCE?.trim();
   const mc: McConfig = {
     host: env("MC_HOST", "localhost"),
     port: Number(env("MC_PORT", "25565")),
     version: process.env.MC_VERSION || undefined,
     auth: env("MC_AUTH", "offline") === "microsoft" ? "microsoft" : "offline",
     loginMessage: process.env.LOGIN_MESSAGE ?? "",
+    viewDistance: vd ? (/^\d+$/.test(vd) ? Number(vd) : vd) : undefined,
+    chunkKeepRadius: Number(env("CHUNK_KEEP_RADIUS", "12")),
   };
   const llm: LlmConfig = {
     // Filled by resolveApiKey() at boot (env var for local dev, else OpenHost secrets).
@@ -68,5 +71,6 @@ export function loadConfig(): AppConfig {
     commandAllowlist,
     maxBots: Number(env("MAX_BOTS", "20")),
     maxPerUser: Number(env("MAX_PER_USER", "5")),
+    dispatcherRecycleMs: Number(env("DISPATCHER_RECYCLE_MIN", "45")) * 60_000,
   };
 }

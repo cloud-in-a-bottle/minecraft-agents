@@ -1,9 +1,10 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "mineflayer";
 import type { Vec3 as Vec3T } from "vec3";
-import { obj, type SkillContext } from "./skillkit.js";
+import { obj, scopeOf, type SkillContext } from "./skillkit.js";
 import { ALL_BEHAVIORS, ALL_SKILLS } from "./registry.js";
 import { Vec3, goals, nearestHostile, sleep, withTimeout } from "./deps.js";
+import { RoutineError, referencedTools, runSteps, type RunCtx } from "./routines.js";
 
 /** Compact perception snapshot fed to the planner every step. */
 export function observe(bot: Bot): string {
@@ -55,10 +56,39 @@ const BASE_TOOLS: Anthropic.Tool[] = [
   { name: "top_down", description: "Top-down 5x5 heightmap: for each column around you, the first block going down from eye height, with its height vs. the ground you stand on (eye=+2, waist=+1, ground=0, below negative).", input_schema: obj({}, []) },
   { name: "set_behavior", description: "Toggle a background auto-behavior that runs until turned off: defend, auto_eat, maintain_light, retreat_if_low_health, lava_guard, anti_stuck.", input_schema: obj({ behavior: { type: "string", enum: ["defend", "auto_eat", "maintain_light", "retreat_if_low_health", "lava_guard", "anti_stuck"] }, enabled: { type: "boolean" } }, ["behavior", "enabled"]) },
   { name: "task_complete", description: "Call when the goal is achieved or is impossible. Ends the task.", input_schema: obj({ summary: { type: "string" } }, ["summary"]) },
+  {
+    name: "save_routine",
+    description:
+      "Save a reusable procedure built from other skills, so repetitive work runs without planning each step. " +
+      "A step is one of: {\"tool\":\"<skill>\",\"args\":{...}} | {\"repeat\":N,\"do\":[steps]} | " +
+      "{\"until\":\"<cond>\",\"max\":N,\"do\":[steps]} | {\"when\":\"<cond>\",\"do\":[steps],\"else\":[steps]}. " +
+      "Use {param} placeholders in args/conditions, filled by run_routine. Conditions: have:<item><op>N, find:<block><op>N, health<op>N, food<op>N (op is >=,<=,>,<,==,!=). " +
+      "Example gather: [{\"until\":\"have:{block}>={count}\",\"max\":30,\"do\":[{\"tool\":\"collect_block\",\"args\":{\"name\":\"{block}\",\"count\":16}},{\"when\":\"find:{block}==0\",\"do\":[{\"tool\":\"dig_staircase\",\"args\":{\"direction\":\"down\",\"length\":8}}]}]}].",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        description: { type: "string" },
+        steps: { type: "array", items: { type: "object" } },
+      },
+      required: ["name", "description", "steps"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "run_routine",
+    description: "Run a saved routine by name, filling its {param} placeholders from args (e.g. {\"block\":\"cobblestone\",\"count\":64}). Executes deterministically with no per-step planning.",
+    input_schema: { type: "object", properties: { name: { type: "string" }, args: { type: "object" } }, required: ["name", "args"], additionalProperties: false },
+  },
+  { name: "list_routines", description: "List saved routines (name + description) available to reuse.", input_schema: obj({}, []) },
 ];
 
 /** Base tools plus everything registered by the category modules. */
 export const TOOLS: Anthropic.Tool[] = [...BASE_TOOLS, ...ALL_SKILLS.map((s) => s.tool)];
+
+const TOOL_NAMES = new Set(TOOLS.map((t) => t.name));
+/** Tools a routine may not contain (would end the task or recurse into authoring). */
+const ROUTINE_FORBIDDEN = new Set(["save_routine", "task_complete"]);
 
 /** Per-tool compact summary for verbose results; the rest fall back to first-line + cap. */
 const TOOL_SUMMARY: Record<string, (full: string) => string> = {
@@ -70,6 +100,8 @@ const TOOL_SUMMARY: Record<string, (full: string) => string> = {
   list_inventory: () => "(inventory checked)",
   get_recipe: (f) => `(recipe: ${f.split("\n")[0].slice(0, 80)})`,
   inventory_gap: (f) => `(gap: ${f.slice(0, 80)})`,
+  list_routines: () => "(routines listed)",
+  run_routine: (f) => f.split(".")[0],
 };
 
 /** Deterministically shrink an old tool result for compacted history. No model call. */
@@ -312,6 +344,49 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
         if (input.enabled) set.add(input.behavior);
         else set.delete(input.behavior);
         return `${input.behavior} ${input.enabled ? "enabled" : "disabled"}`;
+      }
+
+      case "save_routine": {
+        const steps = Array.isArray(input.steps) ? input.steps : [];
+        if (!input.name || steps.length === 0) return "need a name and non-empty steps";
+        const refs = referencedTools(steps);
+        const bad = [...refs].filter((t) => !TOOL_NAMES.has(t) || ROUTINE_FORBIDDEN.has(t));
+        if (bad.length) return `steps reference tools that can't be used in a routine: ${bad.join(", ")}`;
+        ctx.routines.saveRoutine(scopeOf(ctx), { name: String(input.name), description: String(input.description ?? ""), steps });
+        return `saved routine "${input.name}" (${refs.size} distinct skills)`;
+      }
+
+      case "list_routines": {
+        const list = ctx.routines.listRoutines(scopeOf(ctx));
+        return list.length ? list.map((r) => `${r.name}: ${r.description}`).join("\n") : "no routines saved yet";
+      }
+
+      case "run_routine": {
+        const depth = (ctx as any)._routineDepth ?? 0;
+        if (depth >= 3) return "routine nesting too deep (max 3)";
+        const routine = ctx.routines.getRoutine(scopeOf(ctx), String(input.name));
+        if (!routine) {
+          const names = ctx.routines.listRoutines(scopeOf(ctx)).map((r) => r.name).join(", ") || "none";
+          return `no routine "${input.name}" (known: ${names})`;
+        }
+        const childCtx = { ...ctx, _routineDepth: depth + 1 } as SkillContext;
+        const log: string[] = [];
+        const rc: RunCtx = {
+          exec: (tool, a) => execute(bot, mcData, tool, a, childCtx),
+          bot,
+          mcData,
+          budget: { steps: 0, max: 300 },
+          deadline: Date.now() + 5 * 60_000,
+          log,
+        };
+        const args = input.args && typeof input.args === "object" ? input.args : {};
+        try {
+          await runSteps(routine.steps, args, rc);
+          return `ran "${routine.name}" (${rc.budget.steps} skill calls). ${log.slice(-4).join(" | ")}`.trim();
+        } catch (e) {
+          const why = e instanceof RoutineError ? e.message : (e as Error).message;
+          return `routine "${routine.name}" stopped: ${why}. ${log.slice(-3).join(" | ")}`.trim();
+        }
       }
 
       default: {

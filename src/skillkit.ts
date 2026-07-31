@@ -24,6 +24,7 @@ export interface SkillContext {
   mcData: any;
   memory: Memory;
   peers: PeerApi;
+  routines: RoutineStore;
   self: { username: string; owner: string | null };
   behaviors: Set<string>;
 }
@@ -53,6 +54,21 @@ export interface PeerApi {
 export interface SkillEnv {
   memory: Memory;
   peers: PeerApi;
+  routines: RoutineStore;
+}
+
+/** A saved, replayable procedure the agent composes from existing skills. `steps` is interpreted, not code. */
+export interface Routine {
+  name: string;
+  description: string;
+  steps: any[];
+}
+
+/** Durable routine library, scoped per owner (shared across that owner's agents). */
+export interface RoutineStore {
+  saveRoutine(scope: string, routine: Routine): void;
+  getRoutine(scope: string, name: string): Routine | undefined;
+  listRoutines(scope: string): { name: string; description: string }[];
 }
 
 export interface LedgerItem {
