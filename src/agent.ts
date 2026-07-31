@@ -36,7 +36,6 @@ export class Agent {
   private mcInBase = 0; // bytes from previous (closed) connections
   private mcOutBase = 0;
   private stopped = false;
-  private live = false; // true from connect until "end" (covers the pre-spawn limbo state)
   private looping = false;
   private effortOk = true;
   private thinkingOk = true;
@@ -100,7 +99,9 @@ export class Agent {
   start(): void {
     this.stopped = false;
     this.state = "connecting";
-    const prev = socketBytes(this.bot); // fold the closing connection's bytes into the running total
+    this.reconnector.cancelPending();
+    const old = this.bot;
+    const prev = socketBytes(old); // fold the closing connection's bytes into the running total
     this.mcInBase += prev.in;
     this.mcOutBase += prev.out;
     const bot: Bot = mineflayer.createBot({
@@ -114,7 +115,6 @@ export class Agent {
     bot.loadPlugin(collectBlock);
     bot.loadPlugin(pvp);
     this.bot = bot;
-    this.live = true;
 
     bot.once("spawn", () => {
       this.mcData = mcDataLoader(bot.version);
@@ -134,12 +134,13 @@ export class Agent {
     bot.on("kicked", (reason) => this.note(`kicked: ${kickReason(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
-      this.live = false;
+      if (this.bot !== bot) return; // superseded by a newer connection; ignore
       if (this.stopped) return;
       this.state = "connecting";
-      const delay = this.reconnector.scheduleReconnect(() => !this.stopped);
+      const delay = this.reconnector.scheduleReconnect(() => !this.stopped && this.bot === bot);
       if (delay) this.note(`disconnected; reconnecting in ${delay / 1000}s`);
     });
+    if (old) safeQuit(old); // its "end" is ignored (this.bot now points to the new one)
   }
 
   /** Owner-only in-game prompt: `@agent_N <msg>` while it's online. */
@@ -327,13 +328,11 @@ export class Agent {
     return this.state !== "stopped";
   }
 
-  /** Reconnect an idle bot (to pick up a new host/login), even from pre-spawn limbo. Skips busy/stopped ones. */
+  /** Reconnect an idle bot (to pick up a new host/login). start() tears down any existing connection. Skips busy/stopped ones. */
   reconnect(): void {
     if (this.state === "stopped" || this.looping) return;
     this.reconnector.reset();
-    this.stopped = false;
-    if (this.live) safeQuit(this.bot); // "end" handler reconnects using the current mc config
-    else this.start();
+    this.start();
   }
 
   status(): AgentStatus {

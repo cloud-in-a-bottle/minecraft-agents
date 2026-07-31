@@ -91,21 +91,38 @@ export function installAuth(bot: Bot, getMessage: () => string, note: (m: string
   });
 }
 
+const KICK_FRIENDLY: Record<string, string> = {
+  "multiplayer.disconnect.duplicate_login": "duplicate login (another connection with this name)",
+  "multiplayer.disconnect.idling": "kicked for idling (AFK)",
+  "multiplayer.disconnect.kicked": "kicked by an operator",
+  "multiplayer.disconnect.server_shutdown": "server shut down",
+  "multiplayer.disconnect.flying": "flying is not enabled on this server",
+  "multiplayer.disconnect.slow_login": "login timed out",
+};
+
+/** Unwrap prismarine-nbt's {type,value} envelopes to plain values. */
+function unwrapNbt(x: any): any {
+  return x && typeof x === "object" && typeof x.type === "string" && "value" in x ? unwrapNbt(x.value) : x;
+}
+
 function flattenComponent(c: any): string {
+  c = unwrapNbt(c);
   if (c == null) return "";
   if (typeof c === "string") return c;
-  let s = String(c.text ?? c.translate ?? "");
-  if (Array.isArray(c.extra)) s += c.extra.map(flattenComponent).join("");
-  if (Array.isArray(c.with)) s += " " + c.with.map(flattenComponent).join(" ");
+  let s = String(unwrapNbt(c.text) ?? unwrapNbt(c.translate) ?? "");
+  const extra = unwrapNbt(c.extra);
+  if (Array.isArray(extra)) s += extra.map(flattenComponent).join("");
+  const wth = unwrapNbt(c.with);
+  if (Array.isArray(wth)) s += " " + wth.map(flattenComponent).join(" ");
   return s.trim() || JSON.stringify(c);
 }
 
-/** Readable text from a kick/disconnect reason (string, JSON string, or chat component). */
+/** Readable text from a kick/disconnect reason (string, JSON string, chat component, or NBT). */
 export function kickReason(reason: any): string {
-  if (typeof reason === "string") {
-    try { return flattenComponent(JSON.parse(reason)); } catch { return reason; }
-  }
-  return flattenComponent(reason);
+  let r = reason;
+  if (typeof r === "string") { try { r = JSON.parse(r); } catch { return r; } }
+  const s = flattenComponent(r).trim();
+  return KICK_FRIENDLY[s] ?? s;
 }
 
 /** Keep an idle bot from being AFK-kicked: nudge its view periodically. Returns a stop fn. */
@@ -131,6 +148,7 @@ export function logServerMessages(bot: Bot, note: (m: string) => void): void {
 export class Reconnector {
   private attempts = 0;
   private stableTimer: ReturnType<typeof setTimeout> | null = null;
+  private pending: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly maxAttempts: number,
@@ -147,15 +165,22 @@ export class Reconnector {
   /** Call from "end". Reconnects after a growing delay (capped 30s) if `shouldReconnect`, else gives up. */
   scheduleReconnect(shouldReconnect: () => boolean): number {
     if (this.stableTimer) { clearTimeout(this.stableTimer); this.stableTimer = null; }
+    this.cancelPending(); // at most one reconnect ever in flight
     this.attempts++;
     if (this.attempts > this.maxAttempts) { this.onGiveUp(this.attempts); return 0; }
     const delay = Math.min(30000, 2000 * 2 ** (this.attempts - 1));
-    setTimeout(() => { if (shouldReconnect()) this.onReconnect(); }, delay);
+    this.pending = setTimeout(() => { this.pending = null; if (shouldReconnect()) this.onReconnect(); }, delay);
     return delay;
+  }
+
+  /** Cancel a scheduled reconnect without touching the backoff count. */
+  cancelPending(): void {
+    if (this.pending) { clearTimeout(this.pending); this.pending = null; }
   }
 
   reset(): void {
     this.attempts = 0;
+    this.cancelPending();
     if (this.stableTimer) { clearTimeout(this.stableTimer); this.stableTimer = null; }
   }
 }

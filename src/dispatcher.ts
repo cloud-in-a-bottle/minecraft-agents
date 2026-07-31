@@ -35,7 +35,6 @@ function parseLeadingNumbers(str: string): { numbers: number[]; rest: string } {
 export class Dispatcher {
   private bot: Bot | null = null;
   private stopped = false;
-  private live = false; // true from connect until "end" (covers the pre-spawn limbo state)
   private stopAfk: (() => void) | null = null;
   private mcInBase = 0;
   private mcOutBase = 0;
@@ -59,7 +58,9 @@ export class Dispatcher {
 
   start(): void {
     this.stopped = false;
-    const prev = socketBytes(this.bot);
+    this.reconnector.cancelPending();
+    const old = this.bot;
+    const prev = socketBytes(old);
     this.mcInBase += prev.in;
     this.mcOutBase += prev.out;
     const bot: Bot = mineflayer.createBot({
@@ -70,7 +71,6 @@ export class Dispatcher {
       auth: this.mc.auth,
     });
     this.bot = bot;
-    this.live = true;
     bot.once("spawn", () => {
       this.reconnector.markConnected();
       this.note("dispatcher online");
@@ -82,13 +82,14 @@ export class Dispatcher {
     bot.on("kicked", (reason) => this.note(`kicked: ${kickReason(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
-      this.live = false;
+      if (this.bot !== bot) return; // superseded by a newer connection; ignore
       this.stopAfk?.();
       this.stopAfk = null;
       if (this.stopped) return;
-      const delay = this.reconnector.scheduleReconnect(() => !this.stopped);
+      const delay = this.reconnector.scheduleReconnect(() => !this.stopped && this.bot === bot);
       if (delay) this.note(`disconnected; reconnecting in ${delay / 1000}s`);
     });
+    if (old) safeQuit(old); // its "end" is ignored (this.bot now points to the new one)
   }
 
   private reply(username: string, msg: string): void {
@@ -168,12 +169,10 @@ export class Dispatcher {
     safeQuit(this.bot);
   }
 
-  /** Reconnect to pick up a new host/login, even from pre-spawn limbo. */
+  /** Reconnect to pick up a new host/login. start() tears down any existing connection. */
   reconnect(): void {
     this.reconnector.reset();
-    this.stopped = false;
-    if (this.live) safeQuit(this.bot); // "end" handler reconnects with the current config
-    else this.start();
+    this.start();
   }
 
   status(): { username: string; online: boolean; netIn: number; netOut: number; log: string[] } {
