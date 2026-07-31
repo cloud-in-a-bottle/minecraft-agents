@@ -135,6 +135,10 @@ class OpenAiPlanner implements Planner {
         input: safeJsonParse((tc as any).function.arguments),
       });
 
+    // OpenAI folds cached tokens into prompt_tokens; subtract them so input_tokens
+    // means non-cached input, matching Anthropic's usage semantics.
+    const cached = res.usage?.prompt_tokens_details?.cached_tokens ?? 0;
+    const prompt = res.usage?.prompt_tokens ?? 0;
     return {
       id: res.id,
       type: "message",
@@ -143,9 +147,9 @@ class OpenAiPlanner implements Planner {
       content,
       stop_reason: choice.tool_calls?.length ? "tool_use" : "end_turn",
       usage: {
-        input_tokens: res.usage?.prompt_tokens ?? 0,
+        input_tokens: Math.max(0, prompt - cached),
         output_tokens: res.usage?.completion_tokens ?? 0,
-        cache_read_input_tokens: res.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+        cache_read_input_tokens: cached,
       },
     } as unknown as Anthropic.Message;
   }

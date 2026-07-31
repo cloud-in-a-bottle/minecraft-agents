@@ -44,7 +44,7 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `BOTS_CONFIG` | — | Path to a JSON array of `{goal?, model?}` for pre-spawned workers; numbered `agent_1`.. by array order |
 | `LLM_MODEL` | `claude-haiku-4-5` | Default planner model — `claude-haiku-4-5` (`haiku`), `claude-sonnet-5` (`sonnet`), or `gpt-5.6-luna` (`luna`, OpenAI). Provider is picked from the model id; thinking is always off. **Also selectable live in the dashboard** (applies to each worker's next task) |
 | `LLM_EFFORT` | `low` | `low`..`max` (Sonnet only; ignored by Haiku) |
-| `LLM_MAX_STEPS` | `40` | Skill calls per goal before the loop stops |
+| `LLM_MAX_STEPS` | `40` | Skill calls per goal before the loop stops. **Also editable live in the dashboard** (1–1000; applies to in-flight and future tasks) |
 | `COMMAND_ALLOWLIST` | — | Comma-separated usernames allowed to command `@<dispatcher>`; empty = anyone |
 | `MAX_BOTS` | `20` | Cap on concurrent **online** workers (logged-out ones don't count) |
 | `MAX_PER_USER` | `5` | Cap on online workers one player may own (0 = unlimited). Live-editable in the dashboard |
@@ -88,8 +88,9 @@ header. Traffic = real Minecraft socket bytes (on-wire) per bot + approximate AP
 request/response bytes; summed across all workers and the dispatcher. The header
 also has **live-editable controls** — the Minecraft server host/port and login
 message (staged, then **apply** together — this reconnects the fleet), the
-per-user cap (inline), and the **planner model** (dropdown; applies to each
-worker's next task, no restart). A colored dot shows whether the dispatcher is connected.
+per-user cap (inline), the **planner model** (dropdown; applies to each worker's
+next task), and the **step budget** (`max steps`; applies to in-flight and future
+tasks) — all with no restart. A colored dot shows whether the dispatcher is connected.
 **Click any row (or the dispatcher)** to open its log — spawn/kick reasons, server
 auth replies (`srv:`), and the step-by-step tool calls and results. The **per-user cap is
 editable inline** (header input → `POST /config`); it takes effect on the next
@@ -162,7 +163,7 @@ State lives in a SQLite DB (`node:sqlite`, no native build) on the OpenHost
 `app_data` volume (`$OPENHOST_APP_DATA_DIR`), written on every change:
 
 - **Dashboard settings** — server host/port, login message, per-user cap, planner
-  model. Override the env seed at boot, so dashboard edits survive a restart/redeploy.
+  model, step budget. Override the env seed at boot, so dashboard edits survive a restart/redeploy.
 - **Ownership** — each `agent_N`'s owner, so owned/reserved numbers persist across
   restarts (offline placeholders are recreated at boot).
 - **Memory** — per-scope waypoints, notes, and the task ledger.

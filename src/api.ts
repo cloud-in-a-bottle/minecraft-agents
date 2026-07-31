@@ -49,6 +49,7 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   <button id=apply disabled title="reconnects the fleet">apply</button>
   <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon, no restart"></span>
   <span class=stat>model <select id=model title="planner for new tasks; applies to each worker's next task, no restart"></select></span>
+  <span class=stat>max steps <input id=maxsteps type=number min=1 max=1000 title="skill calls per goal (1-1000); applies to in-flight and future tasks, no restart"></span>
   <span class=stat muted id=upd></span>
 </header>
 <div id=wrap><table>
@@ -64,11 +65,13 @@ const k = n => n>=1000 ? (n/1000).toFixed(n>=10000?0:1)+'k' : String(n||0);
 const fb = n => { n=n||0; if(n>=1e9)return (n/1e9).toFixed(2)+'GB'; if(n>=1e6)return (n/1e6).toFixed(1)+'MB'; if(n>=1e3)return (n/1e3).toFixed(0)+'KB'; return n+'B'; };
 const capEl = document.getElementById('cap');
 const modelEl = document.getElementById('model');
+const stepsEl = document.getElementById('maxsteps');
 const hostEl = document.getElementById('host'), portEl = document.getElementById('port'), loginEl = document.getElementById('login');
 const applyEl = document.getElementById('apply');
 const postCfg = patch => fetch('/config', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(patch) });
 capEl.addEventListener('change', () => { const v=Number(capEl.value); if(v>=0) postCfg({ maxPerUser: v }); });
 modelEl.addEventListener('change', () => postCfg({ model: modelEl.value }));
+stepsEl.addEventListener('change', () => { const v=Number(stepsEl.value); if(Number.isInteger(v)&&v>=1&&v<=1000) postCfg({ maxSteps: v }); });
 // Server host/port/login are staged and applied together (they reconnect the fleet).
 let dirty = false;
 const markDirty = () => { dirty = true; applyEl.disabled = false; applyEl.textContent = 'apply'; };
@@ -118,6 +121,7 @@ async function tick(){
     if (Array.isArray(cfg.models) && modelEl.options.length !== cfg.models.length)
       modelEl.innerHTML = cfg.models.map(m => '<option value="'+m+'">'+m+'</option>').join('');
     if (document.activeElement !== modelEl && cfg.model != null) modelEl.value = cfg.model;
+    if (document.activeElement !== stepsEl && cfg.maxSteps != null) stepsEl.value = cfg.maxSteps;
     if (!dirty) {  // don't clobber staged edits before they're applied
       if (cfg.mcHost != null) hostEl.value = cfg.mcHost;
       if (cfg.mcPort != null) portEl.value = cfg.mcPort;
@@ -175,7 +179,7 @@ export function createApi(manager: BotManager): express.Express {
   // Live-editable settings; no restart. Host/port/login changes reconnect the fleet.
   app.post("/config", (req, res) => {
     const b = req.body ?? {};
-    const patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string; model?: string } = {};
+    const patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string; model?: string; maxSteps?: number } = {};
     if (b.maxPerUser !== undefined) {
       const n = Number(b.maxPerUser);
       if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: "maxPerUser must be a number >= 0" });
@@ -197,6 +201,11 @@ export function createApi(manager: BotManager): express.Express {
     if (b.model !== undefined) {
       if (typeof b.model !== "string") return res.status(400).json({ error: "model must be a string" });
       patch.model = b.model;
+    }
+    if (b.maxSteps !== undefined) {
+      const n = Number(b.maxSteps);
+      if (!Number.isInteger(n) || n < 1 || n > 1000) return res.status(400).json({ error: "maxSteps must be 1-1000" });
+      patch.maxSteps = n;
     }
     try {
       manager.updateSettings(patch);

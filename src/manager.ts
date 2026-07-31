@@ -55,11 +55,13 @@ export class BotManager {
     const login = store.getSetting("loginMessage");
     const cap = store.getSetting("maxPerUser");
     const model = store.getSetting("model");
+    const maxSteps = store.getSetting("maxSteps");
     if (host) config.mc.host = host;
     if (port) config.mc.port = Number(port);
     if (login != null) config.mc.loginMessage = login;
     if (cap != null) config.maxPerUser = Number(cap);
     if (model) try { config.llm.model = normalizeModel(model); } catch { /* stale/invalid persisted model */ }
+    if (maxSteps != null) config.llm.maxSteps = Number(maxSteps);
   }
 
   /** Recreate persisted owned numbers as offline placeholders so ownership survives restarts. */
@@ -105,7 +107,7 @@ export class BotManager {
   }
 
   /** Live settings shown/edited in the dashboard. */
-  getSettings(): { maxBots: number; maxPerUser: number; mcHost: string; mcPort: number; loginMessage: string; model: string; models: string[] } {
+  getSettings(): { maxBots: number; maxPerUser: number; mcHost: string; mcPort: number; loginMessage: string; model: string; models: string[]; maxSteps: number } {
     return {
       maxBots: this.config.maxBots,
       maxPerUser: this.maxPerUser,
@@ -114,11 +116,12 @@ export class BotManager {
       loginMessage: this.config.mc.loginMessage,
       model: this.config.llm.model,
       models: [...MODELS],
+      maxSteps: this.config.llm.maxSteps,
     };
   }
 
-  /** Apply a live settings patch, persisting each change. Host/port/login changes reconnect the fleet; the model applies to each worker's next task. */
-  updateSettings(patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string; model?: string }): void {
+  /** Apply a live settings patch, persisting each change. Host/port/login changes reconnect the fleet; model/step-budget apply to each worker's next (or in-flight) task. */
+  updateSettings(patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string; model?: string; maxSteps?: number }): void {
     if (patch.maxPerUser != null) {
       this.maxPerUser = Math.max(0, Math.floor(patch.maxPerUser));
       this.store.setSetting("maxPerUser", String(this.maxPerUser));
@@ -127,6 +130,11 @@ export class BotManager {
       const model = normalizeModel(patch.model); // throws on an unknown model
       this.config.llm.model = model;
       this.store.setSetting("model", model);
+    }
+    if (patch.maxSteps != null) {
+      const maxSteps = Math.min(1000, Math.max(1, Math.floor(patch.maxSteps)));
+      this.config.llm.maxSteps = maxSteps;
+      this.store.setSetting("maxSteps", String(maxSteps));
     }
     let reconnect = false;
     if (patch.mcHost != null && patch.mcHost !== this.config.mc.host) { this.config.mc.host = patch.mcHost; this.store.setSetting("mcHost", patch.mcHost); reconnect = true; }
