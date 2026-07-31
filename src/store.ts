@@ -35,6 +35,10 @@ export class Store implements Memory {
   allAgents(): { username: string; owner: string | null }[] {
     return this.db.prepare("SELECT username, owner FROM agents").all() as { username: string; owner: string | null }[];
   }
+  /** Dev reset: drop all agents + memory. Keeps settings (host/login/caps); the file library is untouched. */
+  wipeAgentData(): void {
+    this.db.exec("DELETE FROM agents; DELETE FROM waypoints; DELETE FROM notes; DELETE FROM ledger;");
+  }
 
   // --- Memory: durable, scoped per owner ---
   setWaypoint(scope: string, name: string, pos: Pos): void {

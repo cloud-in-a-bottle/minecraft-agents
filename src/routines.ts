@@ -66,6 +66,14 @@ export interface RunCtx {
   budget: { steps: number; max: number };
   deadline: number;
   log: string[];
+  /** Live progress sink (agent activity log); receives each control-flow entry and tool step. */
+  note?: (msg: string) => void;
+}
+
+/** Record a line to the summary log and stream it live. */
+function emit(o: RunCtx, msg: string): void {
+  o.log.push(msg);
+  o.note?.(msg);
 }
 
 async function runStep(step: any, args: Record<string, any>, o: RunCtx): Promise<void> {
@@ -77,16 +85,20 @@ async function runStep(step: any, args: Record<string, any>, o: RunCtx): Promise
     if (typeof step.until === "string") {
       const cond = resolve(step.until, args);
       const max = Math.min(Number(step.max) || 64, 256);
+      emit(o, `until ${cond} (max ${max})`);
       for (let i = 0; i < max && !evalCondition(o.bot, o.mcData, cond); i++) await runSteps(step.do, args, o);
       return;
     }
     if (typeof step.repeat === "number") {
       const n = Math.min(step.repeat, 256);
+      emit(o, `repeat ${n}x`);
       for (let i = 0; i < n; i++) await runSteps(step.do, args, o);
       return;
     }
     if (typeof step.when === "string") {
-      const ok = evalCondition(o.bot, o.mcData, resolve(step.when, args));
+      const cond = resolve(step.when, args);
+      const ok = evalCondition(o.bot, o.mcData, cond);
+      emit(o, `when ${cond} → ${ok ? "do" : "else"}`);
       await runSteps(ok ? step.do : Array.isArray(step.else) ? step.else : [], args, o);
       return;
     }
@@ -97,7 +109,7 @@ async function runStep(step: any, args: Record<string, any>, o: RunCtx): Promise
   if (typeof step.tool === "string") {
     o.budget.steps++;
     const result = await o.exec(step.tool, resolve(step.args ?? {}, args));
-    o.log.push(`${step.tool} -> ${result}`);
+    emit(o, `${step.tool} -> ${result}`);
     if (step.stop_on_error && /^(error|unknown|cannot|no such|not carrying)/i.test(result)) {
       throw new RoutineError(`step ${step.tool} failed: ${result}`);
     }

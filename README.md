@@ -76,6 +76,7 @@ All routes are login-gated by the OpenHost router (nothing is public).
 | POST | `/bots/:name/goal` | `{"goal":"..."}` | Retask a worker (admin; reconnects if logged out); **409** if busy |
 | POST | `/bots/:name/chat` | `{"message":"..."}` | Say something in-game |
 | POST | `/bots/:name/stop` | — | Disconnect a worker |
+| POST | `/dev/reset` | `{"confirm":true}` | **Dev:** disconnect + forget every agent and its memory; **keeps** live settings and the shared routine/settings library → `{removed:N}` |
 
 The HTTP channel is admin (owner-gated by the OpenHost router) and bypasses the
 in-game ownership check.

@@ -31,6 +31,8 @@ export interface SkillContext {
   rules: RuleStore;
   self: { username: string; owner: string | null };
   behaviors: Set<string>;
+  /** Live activity-log sink (the agent's log); used to stream routine/rule progress. */
+  note?: (msg: string) => void;
 }
 
 /** A pluggable tool: an Anthropic tool definition plus its executor. */

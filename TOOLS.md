@@ -150,7 +150,10 @@ repetitive work (gathering, crafting chains) it authors one, then replays it wit
 **no per-step LLM calls**. Steps are interpreted data, not code (no `eval`), and
 may only call whitelisted skills. Saved as JSON **files** in the shared library
 (`library/routines/`) — one collection shared by **every** agent, not the DB.
-Execution is bounded by a step budget (300) and a 5-minute deadline.
+Execution is bounded by a step budget (300) and a 5-minute deadline. Progress
+streams live to the agent's activity log — each control-flow entry (`repeat`,
+`until`, `when`) and every step, prefixed `↻ <routine>` (or `⚙ <setting>` when a
+reactive setting fires).
 
 | Tool | Inputs | Does |
 |---|---|---|

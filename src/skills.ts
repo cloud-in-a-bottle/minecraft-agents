@@ -37,6 +37,7 @@ const BASE_TOOLS: Anthropic.Tool[] = [
   },
   { name: "go_to", description: "Walk to a coordinate.", input_schema: obj({ x: { type: "integer" }, y: { type: "integer" }, z: { type: "integer" } }, ["x", "y", "z"]) },
   { name: "go_to_player", description: "Walk to within 2 blocks of a named player.", input_schema: obj({ username: { type: "string" } }, ["username"]) },
+  { name: "go_toward", description: "Travel up to <distance> blocks toward a heading: a cardinal direction (north/south/east/west) or the nearest block of a named type (e.g. oak_log). Best-effort relocation when go_to/collect_block can't path to an exact spot; reports where you end up.", input_schema: obj({ target: { type: "string" }, distance: { type: "integer" } }, ["target", "distance"]) },
   { name: "collect_block", description: "Find, mine, and pick up N blocks of a type (handles tools and pathing).", input_schema: obj({ name: { type: "string" }, count: { type: "integer" } }, ["name", "count"]) },
   { name: "mine_block", description: "Dig the block at an exact coordinate.", input_schema: obj({ x: { type: "integer" }, y: { type: "integer" }, z: { type: "integer" } }, ["x", "y", "z"]) },
   { name: "place_block", description: "Place a carried block at a coordinate (needs a solid block below it).", input_schema: obj({ name: { type: "string" }, x: { type: "integer" }, y: { type: "integer" }, z: { type: "integer" } }, ["name", "x", "y", "z"]) },
@@ -112,6 +113,17 @@ export function summarizeResult(name: string, full: string): string {
 
 type Input = Record<string, any>;
 
+/** Cardinal heading as an [x, z] step. */
+const CARDINAL_DIR: Record<string, [number, number]> = {
+  north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0],
+};
+
+/** A pathfinder give-up (timeout/no-path) rather than a real failure — the planner should relocate, not retry. */
+function isPathBlocked(err: unknown): boolean {
+  const e = err as { name?: string; message?: string };
+  return e?.name === "Timeout" || e?.name === "NoPath" || /took to long|no path|timed out/i.test(e?.message ?? "");
+}
+
 /** Executes one skill and returns a short natural-language result for the planner. */
 export async function execute(bot: Bot, mcData: any, name: string, input: Input, ctx: SkillContext): Promise<string> {
   try {
@@ -142,16 +154,51 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
       case "collect_block": {
         const block = mcData.blocksByName[input.name];
         if (!block) return `unknown block "${input.name}"`;
-        const targets = bot.findBlocks({ matching: block.id, maxDistance: 64, count: input.count });
-        if (targets.length === 0) return `no ${input.name} nearby to collect`;
+        const targets = bot.findBlocks({ matching: block.id, maxDistance: 32, count: input.count });
+        if (targets.length === 0) return `no ${input.name} within 32m to collect`;
         const blocks = targets.map((v: Vec3T) => bot.blockAt(v)).filter(Boolean);
-        await withTimeout((bot as any).collectBlock.collect(blocks), 120_000, "collect_block");
-        return `collected up to ${blocks.length} ${input.name}`;
+        try {
+          await withTimeout((bot as any).collectBlock.collect(blocks), 120_000, "collect_block");
+          return `collected up to ${blocks.length} ${input.name}`;
+        } catch (err) {
+          if (isPathBlocked(err)) return `can't path to the nearest ${input.name} (blocked or too far). Relocate first with go_toward "${input.name}", then collect again.`;
+          throw err;
+        }
+      }
+
+      case "go_toward": {
+        const dist = Math.min(64, Math.max(1, input.distance || 16));
+        const start = bot.entity.position.clone();
+        const dir = CARDINAL_DIR[String(input.target).toLowerCase()];
+        let goal: any;
+        if (dir) {
+          goal = new goals.GoalNearXZ(Math.round(start.x + dir[0] * dist), Math.round(start.z + dir[1] * dist), 2);
+        } else {
+          const b = mcData.blocksByName[input.target];
+          if (!b) return `"${input.target}" is neither a direction (north/south/east/west) nor a known block`;
+          const near = bot.findBlocks({ matching: b.id, maxDistance: 128, count: 1 })[0];
+          if (!near) return `no ${input.target} within 128m to head toward`;
+          const dx = near.x - start.x, dz = near.z - start.z, horiz = Math.hypot(dx, dz) || 1;
+          const reach = Math.min(dist, Math.round(horiz)); // stop at the block if it's nearer than dist
+          goal = new goals.GoalNearXZ(Math.round(start.x + (dx / horiz) * reach), Math.round(start.z + (dz / horiz) * reach), 2);
+        }
+        await withTimeout(bot.pathfinder.goto(goal), 60_000, "go_toward").catch(() => {});
+        const end = bot.entity.position;
+        return `moved ${Math.round(start.distanceTo(end))}m toward ${input.target}, now at (${end.x.toFixed(0)}, ${end.y.toFixed(0)}, ${end.z.toFixed(0)})`;
       }
 
       case "mine_block": {
-        const block = bot.blockAt(new Vec3(input.x, input.y, input.z));
+        const at = new Vec3(input.x, input.y, input.z);
+        let block = bot.blockAt(at);
         if (!block || block.name === "air") return "no block at that coordinate";
+        // bot.dig only works within reach; pathfind adjacent first if the block is too far.
+        const inReach = () => (typeof (bot as any).canDigBlock === "function" ? (bot as any).canDigBlock(block) : bot.entity.position.distanceTo(at) <= 4);
+        if (!inReach()) {
+          await withTimeout(bot.pathfinder.goto(new goals.GoalNear(input.x, input.y, input.z, 2)), 60_000, "approach").catch(() => {});
+          block = bot.blockAt(at);
+          if (!block || block.name === "air") return "no block at that coordinate";
+        }
+        if (!inReach()) return `can't reach the block at (${input.x}, ${input.y}, ${input.z}) — path blocked; clear a way or mine from an adjacent spot`;
         await withTimeout(bot.dig(block), 60_000, "mine_block");
         return `mined ${block.name}`;
       }
@@ -159,8 +206,14 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
       case "place_block": {
         const item = bot.inventory.items().find((i) => i.name === input.name);
         if (!item) return `not carrying ${input.name}`;
+        const at = new Vec3(input.x, input.y, input.z);
+        // placeBlock only works within reach; pathfind closer if the target is too far.
+        if (bot.entity.position.distanceTo(at) > 4) {
+          await withTimeout(bot.pathfinder.goto(new goals.GoalNear(input.x, input.y, input.z, 2)), 60_000, "approach").catch(() => {});
+        }
         const below = bot.blockAt(new Vec3(input.x, input.y - 1, input.z));
         if (!below || below.name === "air") return "no solid block to place against below the target";
+        if (bot.entity.position.distanceTo(at) > 5) return `can't reach (${input.x}, ${input.y}, ${input.z}) to place — path blocked; move closer`;
         await bot.equip(item, "hand");
         await withTimeout(bot.placeBlock(below, new Vec3(0, 1, 0)), 30_000, "place_block");
         return `placed ${input.name}`;
@@ -364,6 +417,7 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
           budget: { steps: 0, max: 300 },
           deadline: Date.now() + 5 * 60_000,
           log,
+          note: ctx.note ? (m) => ctx.note!(`↻ ${routine.name}: ${m}`) : undefined,
         };
         const args = input.args && typeof input.args === "object" ? input.args : {};
         try {

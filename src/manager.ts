@@ -246,6 +246,16 @@ export class BotManager {
     return { done, skipped };
   }
 
+  /** Dev reset: disconnect and forget every worker + its memory. Keeps live settings and the shared library (routines/settings). Dispatcher stays online. */
+  wipeAgents(): { removed: number } {
+    const removed = this.agents.size;
+    for (const a of this.agents.values()) a.stop();
+    this.agents.clear();
+    this.store.wipeAgentData();
+    this.nextNumber = 1;
+    return { removed };
+  }
+
   get(username: string): Agent | undefined {
     return this.agents.get(username);
   }

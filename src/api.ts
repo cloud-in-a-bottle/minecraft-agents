@@ -260,6 +260,13 @@ export function createApi(manager: BotManager): express.Express {
     res.json({ ok: true });
   });
 
+  // Dev reset: wipe every agent + its memory; keeps live settings and the shared
+  // library (routines/settings). Guarded by an explicit confirm.
+  app.post("/dev/reset", (req, res) => {
+    if (req.body?.confirm !== true) return res.status(400).json({ error: 'send { "confirm": true } — this disconnects and forgets all agents' });
+    res.json({ ok: true, ...manager.wipeAgents() });
+  });
+
   app.get("/", (_req, res) => {
     res.type("html").send(DASHBOARD);
   });

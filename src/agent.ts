@@ -14,7 +14,7 @@ Rules:
 - If a skill returns an error, try a different concrete approach rather than repeating it.
 - You can only talk to your owner and to fellow agents owned by them: use "message" to reach one, "message_team" to reach all your teammates. There is no public chat.
 - Owner messages appear as OWNER:, teammate messages as AGENT <name>:, and damage as a "took N damage" note — respond to these.
-- For repetitive work (gathering, crafting chains), save a routine once with save_routine, then run_routine to execute it without planning each step; check list_routines first to reuse one.
+- Before a large or repetitive task, build your tools first: check list_routines to reuse one, otherwise author a routine with save_routine, then run_routine — this runs many steps with no per-step planning. Routines and settings are a shared library across all agents.
 - To react automatically to conditions (low food/health, etc.), create a setting once with create_setting (e.g. food<14 -> collect and eat food); it runs on its own until you delete it.
 - Call task_complete as soon as the goal is met or is clearly impossible.`;
 
@@ -80,6 +80,7 @@ export class Agent {
       rules: this.env.rules,
       self: { username: this.spec.username, owner: this.owner },
       behaviors: this.behaviors,
+      note: (m) => this.note(m),
     };
   }
 

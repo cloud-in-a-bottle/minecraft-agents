@@ -14,6 +14,7 @@ export class RuleEngine {
         if (!evalCondition(ctx.bot, ctx.mcData, rule.condition)) continue;
 
         this.running.add(rule.name);
+        ctx.note?.(`⚙ setting "${rule.name}" fired (${rule.condition})`);
         const rc: RunCtx = {
           exec,
           bot: ctx.bot,
@@ -21,6 +22,7 @@ export class RuleEngine {
           budget: { steps: 0, max: 100 },
           deadline: Date.now() + 60_000,
           log: [],
+          note: ctx.note ? (m) => ctx.note!(`⚙ ${rule.name}: ${m}`) : undefined,
         };
         void runSteps(rule.steps, {}, rc)
           .catch(() => {}) // swallow (RoutineError or otherwise): a failing rule must not crash the tick
