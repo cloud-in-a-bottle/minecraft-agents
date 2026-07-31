@@ -134,6 +134,27 @@ fn nearby_entities(bot: &Client, max: f64) -> Vec<(EntityKind, Vec3)> {
     out
 }
 
+/// Walk onto nearby item drops so Minecraft auto-picks them up; best-effort, returns count reached.
+async fn collect_nearby_drops(bot: &Client, radius: f64) -> usize {
+    let Some(origin) = self_pos(bot) else {
+        return 0;
+    };
+    let drops: Vec<Vec3> = bot
+        .nearest_entities_by::<&EntityKindComponent, ()>(|k: &EntityKindComponent| k.0 == EntityKind::Item)
+        .into_iter()
+        .map(|e| *bot.entity_component::<Position>(e))
+        .filter(|p| origin.distance_to(*p) <= radius)
+        .take(16)
+        .collect();
+    let mut n = 0;
+    for p in drops {
+        if with_timeout(bot.goto(RadiusGoal::new(p, 1.0)), 8_000, "collect_block pickup").await.is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
 // --- observe ---
 
 /// Compact perception snapshot fed to the planner every step.
@@ -353,6 +374,7 @@ async fn run(ctx: &SkillContext, name: &str, input: &Value) -> anyhow::Result<St
                 return Ok(format!("no {bname} within 32m to collect"));
             }
             let mut mined = 0usize;
+            let mut picked = 0usize;
             for at in &targets {
                 let center = at.center();
                 let _ = with_timeout(bot.goto(RadiusGoal::new(center, 2.0)), 20_000, "approach").await;
@@ -363,6 +385,10 @@ async fn run(ctx: &SkillContext, name: &str, input: &Value) -> anyhow::Result<St
                 equip_best_tool(bot, state, false).await;
                 if with_timeout(bot.mine(*at), 30_000, "collect_block").await.is_ok() {
                     mined += 1;
+                    // Pick up per block: let the drop entity spawn, then walk onto nearby drops.
+                    // Doing it here (not just at the end) means spread-out targets don't strand drops.
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    picked += collect_nearby_drops(bot, 5.0).await;
                 }
             }
             if mined == 0 {
@@ -370,7 +396,12 @@ async fn run(ctx: &SkillContext, name: &str, input: &Value) -> anyhow::Result<St
                     "can't path to the nearest {bname} (blocked or too far). Relocate first with go_toward \"{bname}\", then collect again."
                 ));
             }
-            format!("collected up to {mined} {bname}")
+            picked += collect_nearby_drops(bot, 6.0).await; // final sweep for stragglers
+            if picked > 0 {
+                format!("collected up to {mined} {bname} ({picked} drop(s) gathered)")
+            } else {
+                format!("collected up to {mined} {bname}")
+            }
         }
 
         "mine_block" => {
@@ -713,6 +744,7 @@ async fn run_routine(ctx: &SkillContext, input: &Value) -> String {
         deadline: Instant::now() + Duration::from_secs(300),
         log: Vec::new(),
         note: Some(step_note),
+        interrupt: Some(ctx.wake.clone()), // owner prompt / damage aborts the routine so the planner re-plans
     };
     let args: Map<String, Value> =
         input.get("args").and_then(Value::as_object).cloned().unwrap_or_default();

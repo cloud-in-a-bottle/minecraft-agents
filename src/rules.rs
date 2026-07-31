@@ -76,6 +76,7 @@ impl RuleEngine {
                     deadline: Instant::now() + Duration::from_secs(60),
                     log: Vec::new(),
                     note: step_note,
+                    interrupt: None, // background rule; independent of the planner's inject queue
                 };
                 let args = Map::new();
                 let _ = run_steps(&steps, &args, &mut ctx).await; // swallow: a failing rule must not crash the tick

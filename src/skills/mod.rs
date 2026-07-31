@@ -49,6 +49,9 @@ pub struct SkillContext {
     pub behaviors: Arc<Mutex<HashSet<String>>>,
     /// Live activity-log sink (the agent's log).
     pub note: Arc<dyn Fn(&str) + Send + Sync>,
+    /// True when the planner has a pending injected message (owner prompt / damage) — routines poll
+    /// this to abort early so the planner can react instead of finishing a long routine first.
+    pub wake: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl SkillContext {

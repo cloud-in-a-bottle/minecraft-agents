@@ -33,6 +33,9 @@ Rules:
 - Decompose the goal into short, concrete steps. Long-horizon plans fail; act, observe, adjust.
 - Before each tool call, output one short sentence saying what you're doing and why.
 - Never invent coordinates — use find_blocks to locate things before moving or mining.
+- All variants of a material family are interchangeable: every *_log counts as "logs", every *_planks as "planks", every *_stone/*_wood etc. the same. For a general goal like "get 64 logs", gather ANY wood type — do not fixate on one species; collect whatever is nearest (use match_block_names/find_blocks to see the variants available).
+- Mining is not the same as HAVING the item: a broken block drops an item on the ground that only becomes yours once you walk over it. collect_block gathers drops as it mines, but drops scatter, land in odd spots, or get missed — so after any mining, VERIFY the item is actually in your inventory (check the count). If it's short of what you broke, use find_items (optionally by name) to locate stray drops and collect_drops to walk over and grab them before moving on. Never assume a mine succeeded in giving you the item.
+- MAKE THE RIGHT TOOLS BEFORE any long gathering or mining run — never harvest bare-handed. The correct tool is far faster, and many blocks give NO drop without the right tier (iron/diamond ore need a stone-or-better / iron-or-better pickaxe; logs go fastest with an axe). Bootstrap the tech tree first: get a few logs → planks → sticks + a crafting_table → wooden pickaxe/axe → mine cobblestone → stone tools, THEN start the real harvest. Use get_block_info when unsure what a block needs, and inventory_gap to see what the plan still requires. Bake this tool-first ordering into any gathering routine you author.
 - go_to and collect_block only path reliably within ~32 blocks. For anything farther, close the gap in stages with go_toward (a cardinal direction or a block type), then act.
 - If a skill returns an error, try a different concrete approach rather than repeating it.
 - You can only talk to your owner and to fellow agents owned by them: use "message" to reach one, "message_team" to reach all your teammates. There is no public chat.
@@ -61,14 +64,14 @@ fn effort_str(e: Effort) -> String {
     .to_string()
 }
 
-/// Client-info view distance from the config string ("tiny".."far" or a chunk count).
+/// Client-info view distance from the config string ("tiny".."far" or a chunk count); default 3.
 fn view_chunks(v: &Option<String>) -> u8 {
     match v.as_deref() {
         Some("tiny") => 2,
         Some("short") => 4,
         Some("far") => 12,
-        Some(s) => s.parse().unwrap_or(8),
-        None => 8,
+        Some(s) => s.parse().unwrap_or(3),
+        None => 3,
     }
 }
 
@@ -414,6 +417,7 @@ fn make_ctx(s: &Arc<AgentShared>, bot: Client) -> SkillContext {
         self_: SelfInfo { username: s.spec.username.clone(), owner: s.owner() },
         behaviors: s.behaviors.clone(),
         note: s.note_fn(),
+        wake: { let s = s.clone(); Arc::new(move || !s.injected.lock().is_empty()) },
     }
 }
 

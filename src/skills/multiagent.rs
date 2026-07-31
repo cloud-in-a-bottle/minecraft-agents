@@ -1,10 +1,12 @@
 //! Cross-agent skills (port of skills_multiagent.ts): summon, activate, collect drops, give, go-to.
 use crate::llm::ToolDef;
 use crate::mc;
+use crate::skill::rel;
 use crate::skills::{Skill, SkillContext};
-use crate::types::RejectReason;
+use crate::types::{Pos, RejectReason};
 use async_trait::async_trait;
 use azalea::block::BlockState;
+use azalea::entity::metadata::ItemItem;
 use azalea::entity::{EntityKindComponent, Position};
 use azalea::pathfinder::goals::RadiusGoal;
 use azalea::prelude::*;
@@ -18,6 +20,7 @@ pub fn skills() -> Vec<Arc<dyn Skill>> {
         Arc::new(SummonAgents),
         Arc::new(ActivateBlock),
         Arc::new(CollectDrops),
+        Arc::new(FindItems),
         Arc::new(GiveItem),
         Arc::new(GoToAgent),
     ]
@@ -119,6 +122,61 @@ impl Skill for CollectDrops {
             }
         }
         format!("gathered {gathered} of {total} dropped item(s)")
+    }
+}
+
+struct FindItems;
+#[async_trait]
+impl Skill for FindItems {
+    fn tool(&self) -> ToolDef {
+        ToolDef {
+            name: "find_items".into(),
+            description: "Scan for dropped items within <max_distance>m. name \"\" lists all; a non-empty name filters to that item. Each result: \"<item> x<count>  <offset>\", nearest-first.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" }, "max_distance": { "type": "integer" } },
+                "required": ["name", "max_distance"], "additionalProperties": false,
+            }),
+        }
+    }
+    async fn run(&self, ctx: &SkillContext, input: Value) -> String {
+        use azalea::registry::Registry;
+        let name = input.get("name").and_then(Value::as_str).unwrap_or("");
+        let max = (int(&input, "max_distance")).max(1) as f64;
+        let origin = ctx.bot.position();
+        let from = Pos { x: origin.x, y: origin.y, z: origin.z };
+        let mut lines = Vec::new();
+        // nearest_entities_by is already sorted nearest-first.
+        for e in ctx.bot.nearest_entities_by::<&EntityKindComponent, ()>(|k: &EntityKindComponent| k.0 == EntityKind::Item) {
+            let p = *ctx.bot.entity_component::<Position>(e);
+            if origin.distance_to(p) > max {
+                continue;
+            }
+            let stack = ctx.bot.get_entity_component::<ItemItem>(e).map(|s| s.0);
+            let (item, count) = match stack.as_ref().filter(|s| s.is_present()) {
+                Some(s) => (
+                    ctx.mc_data.item_name(s.kind().to_u32()).unwrap_or_else(|| "item".into()),
+                    s.count().max(1),
+                ),
+                None => ("item".into(), 1),
+            };
+            if !name.is_empty() && item != name {
+                continue;
+            }
+            let to = Pos { x: p.x, y: p.y, z: p.z };
+            lines.push(format!("{item} x{count}  {}", rel(from, to)));
+            if lines.len() >= 20 {
+                break;
+            }
+        }
+        if lines.is_empty() {
+            return if name.is_empty() {
+                format!("no dropped items within {}m", max as i64)
+            } else {
+                format!("no {name} dropped within {}m", max as i64)
+            };
+        }
+        lines.join("\n")
     }
 }
 

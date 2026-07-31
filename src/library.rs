@@ -1,5 +1,6 @@
 //! JSON-file-per-item library (port of filestore.ts + routinestore.ts + rulestore.ts).
 use crate::skill::{Routine, Rule, RoutineStore, RuleStore};
+use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -27,12 +28,17 @@ fn slug(s: &str) -> String {
 /// JSON-file-per-item store at <baseDir>/<scope>/<name>.json. Robust to missing dirs and junk files.
 pub struct JsonDirStore<T> {
     base_dir: PathBuf,
+    write_lock: Mutex<()>, // serializes writers; all agents share one store instance
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: Serialize + DeserializeOwned + Named> JsonDirStore<T> {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        JsonDirStore { base_dir: base_dir.into(), _marker: std::marker::PhantomData }
+        JsonDirStore {
+            base_dir: base_dir.into(),
+            write_lock: Mutex::new(()),
+            _marker: std::marker::PhantomData,
+        }
     }
 
     fn dir(&self, scope: &str) -> PathBuf {
@@ -40,11 +46,17 @@ impl<T: Serialize + DeserializeOwned + Named> JsonDirStore<T> {
     }
 
     pub fn save(&self, scope: &str, item: &T) {
+        let Ok(json) = serde_json::to_string_pretty(item) else { return };
         let dir = self.dir(scope);
+        let name = slug(item.name());
+        let file = dir.join(format!("{name}.json"));
+        let tmp = dir.join(format!(".{name}.json.tmp"));
+        // Serialize writers + write atomically (temp then rename): a concurrent reader never sees a
+        // half-written file, and two agents saving at once can't clobber each other.
+        let _guard = self.write_lock.lock();
         let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join(format!("{}.json", slug(item.name())));
-        if let Ok(json) = serde_json::to_string_pretty(item) {
-            let _ = std::fs::write(file, json);
+        if std::fs::write(&tmp, json.as_bytes()).is_ok() {
+            let _ = std::fs::rename(&tmp, &file);
         }
     }
     pub fn get(&self, scope: &str, name: &str) -> Option<T> {
@@ -75,6 +87,7 @@ impl<T: Serialize + DeserializeOwned + Named> JsonDirStore<T> {
     }
     pub fn delete(&self, scope: &str, name: &str) -> bool {
         let file = self.dir(scope).join(format!("{}.json", slug(name)));
+        let _guard = self.write_lock.lock(); // serialize with a concurrent save of the same file
         if !Path::new(&file).exists() {
             return false;
         }

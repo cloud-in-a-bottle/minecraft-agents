@@ -142,6 +142,8 @@ pub struct RunCtx {
     pub log: Vec<String>,
     /// Live progress sink (agent activity log); receives each control-flow entry and tool step.
     pub note: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// When set and it returns true, abort between steps so the planner can react (owner prompt / damage).
+    pub interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 /// Record a line to the summary log and stream it live.
@@ -171,6 +173,11 @@ fn run_step<'a>(
         }
         if ctx.budget.steps >= ctx.budget.max {
             return Err(RoutineError(format!("step budget ({}) exhausted", ctx.budget.max)));
+        }
+        if let Some(intr) = &ctx.interrupt {
+            if intr() {
+                return Err(RoutineError("interrupted by an owner message or damage".to_string()));
+            }
         }
         let obj = match step.as_object() {
             Some(o) => o,

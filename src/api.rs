@@ -61,6 +61,9 @@ const DASHBOARD: &str = r#"<!doctype html><meta charset=utf-8>
   <span class=stat>active <span id=active>0</span></span>
   <span class=stat>tokens <span id=tok>0</span></span>
   <span class=stat>traffic <span id=net>0</span></span>
+  <span class=stat title="process CPU, % of all-core capacity">cpu <span id=cpu>—</span></span>
+  <span class=stat title="resident memory (and % of the container limit)">mem <span id=mem>—</span></span>
+  <span class=stat title="fleet LLM API rate (rolling): requests/min · tokens/min">llm <span id=llm>—</span></span>
   <span class=stat>server <input id=host placeholder=host style="width:200px"> : <input id=port type=number style="width:78px"></span>
   <span class=stat>login <input id=login type=text placeholder="/login <pw>" style="width:200px" title="sent on join; two-step with &&, e.g. /register <pw> <pw> && /login <pw>"></span>
   <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon"></span>
@@ -138,10 +141,11 @@ async function renderDetail(reset){
 }
 async function tick(){
   try {
-    const [bots, disp, cfg] = await Promise.all([
+    const [bots, disp, cfg, met] = await Promise.all([
       fetch('/bots').then(r=>r.json()),
       fetch('/dispatcher').then(r=>r.json()).catch(()=>({})),
       fetch('/config').then(r=>r.json()).catch(()=>({})),
+      fetch('/metrics').then(r=>r.json()).catch(()=>({})),
     ]);
     if (Array.isArray(cfg.models) && modelEl.options.length !== cfg.models.length)
       modelEl.innerHTML = cfg.models.map(m => '<option value="'+m+'">'+m+'</option>').join('');
@@ -162,6 +166,9 @@ async function tick(){
     document.getElementById('active').textContent = bots.filter(b=>b.state==='working').length;
     document.getElementById('tok').textContent = k(bots.reduce((s,b)=>s+(b.tokensIn||0)+(b.tokensOut||0),0));
     document.getElementById('net').textContent = fb(bots.reduce((s,b)=>s+(b.netIn||0)+(b.netOut||0),0)+(disp.netIn||0)+(disp.netOut||0));
+    document.getElementById('cpu').textContent = met.cpu_pct!=null ? met.cpu_pct.toFixed(0)+'%' : 'n/a';
+    document.getElementById('mem').textContent = met.mem_mb!=null ? Math.round(met.mem_mb)+'MB'+(met.mem_pct!=null?' ('+met.mem_pct.toFixed(0)+'%)':'') : 'n/a';
+    document.getElementById('llm').textContent = (met.llm_rpm||0)+'/min · '+k(met.llm_tpm||0)+' tok/min';
     document.getElementById('upd').textContent = new Date().toLocaleTimeString();
     bots.sort((a,b)=> (a.username).localeCompare(b.username, undefined, {numeric:true}));
     document.getElementById('rows').innerHTML = bots.map(b => {
@@ -192,6 +199,7 @@ pub fn create_api(manager: Arc<BotManager>) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/health", get(health))
+        .route("/metrics", get(metrics))
         .route("/dispatcher", get(dispatcher))
         .route("/config", get(get_config).post(post_config))
         .route("/bots", get(list_bots))
@@ -272,6 +280,10 @@ async fn index() -> Html<&'static str> {
 
 async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+async fn metrics() -> Json<crate::stats::Metrics> {
+    Json(crate::stats::snapshot())
 }
 
 async fn dispatcher(State(m): Mgr) -> Json<DispatcherStatus> {

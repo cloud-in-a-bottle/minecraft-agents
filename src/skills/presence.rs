@@ -2,12 +2,13 @@
 use crate::llm::ToolDef;
 use crate::skills::{Skill, SkillContext};
 use async_trait::async_trait;
+use azalea::ClientInformation;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::{Arc, OnceLock};
 
 pub fn skills() -> Vec<Arc<dyn Skill>> {
-    vec![Arc::new(WhoOnline)]
+    vec![Arc::new(WhoOnline), Arc::new(SetViewDistance)]
 }
 
 fn agent_re() -> &'static Regex {
@@ -45,6 +46,24 @@ impl Skill for WhoOnline {
         }
         entries.sort_by(|a, b| natural_cmp(&a.0, &b.0));
         format!("{} online: {}", entries.len(), entries.iter().map(|e| e.1.clone()).collect::<Vec<_>>().join(", "))
+    }
+}
+
+struct SetViewDistance;
+#[async_trait]
+impl Skill for SetViewDistance {
+    fn tool(&self) -> ToolDef {
+        ToolDef {
+            name: "set_view_distance".into(),
+            description: "Set how many chunks you load and can see (2-12). Raise it to explore or scan farther, lower it to save memory. Default is 3.".into(),
+            input_schema: json!({ "type": "object", "properties": { "chunks": { "type": "integer" } }, "required": ["chunks"], "additionalProperties": false }),
+        }
+    }
+    async fn run(&self, ctx: &SkillContext, input: Value) -> String {
+        // Clamp <=12 so we never load past the chunk-prune keep radius (blocks would go missing).
+        let n = input.get("chunks").and_then(Value::as_i64).unwrap_or(3).clamp(2, 12) as u8;
+        ctx.bot.set_client_information(ClientInformation { view_distance: n, ..Default::default() });
+        format!("view distance set to {n} chunks")
     }
 }
 

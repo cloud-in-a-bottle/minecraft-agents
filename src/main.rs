@@ -13,6 +13,7 @@ mod rules;
 mod secrets;
 mod skill;
 mod skills;
+mod stats;
 mod store;
 mod types;
 
@@ -31,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let store = Arc::new(store::Store::new(&config.db_path)?);
     let manager = Arc::new(manager::BotManager::new(config.clone(), store));
     manager.start_all();
+    stats::spawn_sampler(); // process CPU/mem + LLM-rate gauges for the dashboard /metrics
 
     let port = config.port;
     let app = api::create_api(manager.clone());

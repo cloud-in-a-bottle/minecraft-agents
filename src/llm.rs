@@ -185,6 +185,7 @@ impl Planner for AnthropicPlanner {
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
         };
+        crate::stats::record_llm(usage.input_tokens + usage.output_tokens);
         Ok(PlanResponse { content, usage })
     }
 }
@@ -253,7 +254,7 @@ impl Planner for OpenAiPlanner {
         let mut body = json!({
             "model": req.model,
             "input": to_responses_input(&req.messages),
-            "reasoning": { "effort": "minimal" },
+            "reasoning": { "effort": "none" }, // gpt-5.6-luna dropped "minimal"; "none" is its near-zero setting
             "max_output_tokens": req.max_tokens + 512, // room for preamble alongside the tool call
         });
         let obj = body.as_object_mut().unwrap();
@@ -319,6 +320,7 @@ impl Planner for OpenAiPlanner {
             output_tokens: u.and_then(|u| u.get("output_tokens")).and_then(Value::as_u64).unwrap_or(0),
             cache_read_input_tokens: cached,
         };
+        crate::stats::record_llm(usage.input_tokens + usage.output_tokens);
         Ok(PlanResponse { content, usage })
     }
 }

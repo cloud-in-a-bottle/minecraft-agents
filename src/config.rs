@@ -89,7 +89,7 @@ pub fn load_config() -> Result<AppConfig> {
         auth: if env("MC_AUTH", Some("offline"))? == "microsoft" { AuthMode::Microsoft } else { AuthMode::Offline },
         login_message: std::env::var("LOGIN_MESSAGE").unwrap_or_default(),
         view_distance,
-        chunk_keep_radius: env("CHUNK_KEEP_RADIUS", Some("12"))?.parse()?,
+        chunk_keep_radius: env("CHUNK_KEEP_RADIUS", Some("4"))?.parse()?,
     };
     let llm = LlmConfig {
         api_key: std::env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
