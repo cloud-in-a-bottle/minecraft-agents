@@ -1,8 +1,10 @@
 [app]
 name = "minecraft-agents"
 version = "0.1.0"
-description = "LLM-driven Mineflayer agents; one app configures any number of bots"
+description = "LLM-driven azalea (Rust) Minecraft agents; one app runs the whole swarm"
 
+# Multi-stage Rust build (see Dockerfile). First build compiles azalea + Bevy and is
+# heavy (minutes, multi-GB RAM); the dep layer caches, so code-only redeploys are fast.
 [runtime.container]
 image = "Dockerfile"
 port = 8080

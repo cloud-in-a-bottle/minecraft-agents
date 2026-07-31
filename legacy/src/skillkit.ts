@@ -18,6 +18,14 @@ export const obj = (properties: Record<string, unknown>, required: string[]): An
 /** Memory scope for a context: the owner if any, else the bot's own name. */
 export const scopeOf = (ctx: SkillContext): string => ctx.self.owner ?? ctx.self.username;
 
+/** A coordinate as a signed offset from the bot, with 3D distance: "+5 -2 +3 (6m)". */
+export const rel = (from: Pos, to: Pos): string => {
+  const d = (a: number, b: number): number => Math.round(a - b);
+  const dx = d(to.x, from.x), dy = d(to.y, from.y), dz = d(to.z, from.z);
+  const s = (n: number): string => (n >= 0 ? `+${n}` : `${n}`);
+  return `${s(dx)} ${s(dy)} ${s(dz)} (${Math.round(Math.hypot(dx, dy, dz))}m)`;
+};
+
 /** Scope for the routine + settings library: one shared collection for every agent. */
 export const SHARED_SCOPE = "shared";
 

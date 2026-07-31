@@ -6,10 +6,17 @@ internal action space** — distinct from the chat commands in
 
 Each call returns a short text result. Every action is **time-boxed** so a stuck
 pathfind can't wedge the loop, and each step the planner is given a **perception
-snapshot** (position, health/food, held item, inventory, nearby players, hostile
-mobs within 16 m) plus a **durable-memory summary** (open ledger items + saved
-waypoint names). Navigation uses `mineflayer-pathfinder` (A\*), not Baritone;
+snapshot** (absolute position, health/food, held item, inventory, nearby players,
+hostile mobs within 16 m) plus a **durable-memory summary** (open ledger items +
+saved waypoint names). Navigation uses `mineflayer-pathfinder` (A\*), not Baritone;
 sustained combat uses `mineflayer-pvp`.
+
+**Coordinates:** tools that report the location of a block or station return a
+**signed offset from the bot** (`+x` east, `+y` up, `+z` south) with distance —
+e.g. `+5 -2 +3 (6m)`. The bot's own **absolute** position is the anchor: it's in
+every perception snapshot and readable on demand with `get_position`; add an offset
+to it for an absolute coordinate to pass to `go_to`/`mine_block`/`place_block`.
+Saved waypoints stay absolute (persistent named anchors).
 
 Base tools live in `src/skills.ts`; the rest are pluggable modules
 (`src/skills_iron.ts`, `_memory.ts`, `_survival.ts`, `_multiagent.ts`, plus the
@@ -21,7 +28,8 @@ aggregated in `src/registry.ts`.
 | Tool | Inputs | Returns |
 |---|---|---|
 | `list_inventory` | — | Everything the bot is carrying |
-| `find_blocks` | `name, count, max_distance` | Coordinates of the nearest N blocks of a type |
+| `find_blocks` | `name, count, max_distance` | Nearest N blocks of a type, each as a **signed offset from the bot** (`+x` east, `+y` up, `+z` south) with distance — e.g. `+5 -2 +3 (6m)` |
+| `get_position` | — | The bot's current **absolute** world coordinates `(x, y, z)` — the anchor; add a `find_blocks` offset to it for an absolute coordinate |
 | `scan_area` | `radius` (max 8) | Count of every solid block within the radius, by type |
 | `top_down` | — | 5×5 heightmap: first block down per column, height vs. ground (eye `+2`, waist `+1`, ground `0`, below negative) |
 | `match_block_names` | `pattern, limit` | Block names matching a regex |
@@ -63,7 +71,7 @@ manual control — armor, weapons, or a specific held item.
 | Tool | Inputs | Does |
 |---|---|---|
 | `smelt` | `input, fuel, count` | Operate the nearest furnace: load fuel+input, wait, collect output |
-| `craft_station` | `station` (`crafting_table`\|`furnace`\|`blast_furnace`) | Ensure a station is nearby, crafting + placing one if absent |
+| `craft_station` | `station` (`crafting_table`\|`furnace`\|`blast_furnace`) | Ensure a station is nearby, crafting + placing one if absent; returns its offset from the bot |
 | `dig_staircase` | `target_y` | Dig a descending 2-high staircase to a depth, torching, lava-guarded (bounded) |
 | `strip_mine` | `direction` (n/s/e/w), `length` (max 64) | Dig a 1×2 branch tunnel, torching at intervals, stopping at lava |
 | `dig_down_safe` | `depth` | Mine straight down, stopping if lava/water/void is 2 below |

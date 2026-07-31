@@ -1,0 +1,33 @@
+[package]
+name = "minecraft-agents"
+version = "0.1.0"
+edition = "2021"
+
+# Dep list owned here; source modules live under src/ (see PORT.md). Add crates here, not ad hoc.
+[dependencies]
+azalea = "=0.15.1"                                                             # +mc1.21.11 — do NOT bump (0.16 = mc26.1)
+bevy_ecs = "=0.18.1"                                                            # azalea's ECS (crates.io, matched) — needed to #[derive(Component)] in our modules
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }                        # bundled = no system libsqlite3 in the image
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }  # rustls (matches azalea); no openssl
+axum = "0.7"
+anyhow = "1"
+async-trait = "0.1"
+parking_lot = "0.12"
+regex = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "minecraft-agents"
+path = "src/main.rs"
+
+# Trimmed for constrained image builders: opt-level 2 (faster/lower-RAM codegen than 3),
+# strip symbols to shrink the runtime binary. The RustCrypto pre-release pins that make
+# azalea 0.15.1 build live in Cargo.lock (committed) — build with --locked to honor them.
+[profile.release]
+opt-level = 2
+strip = true

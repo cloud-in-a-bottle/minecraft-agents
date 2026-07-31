@@ -88,10 +88,11 @@ applyEl.addEventListener('click', async () => {
 });
 // ---- detail panel: click an agent (or the dispatcher) to read its log/conversation ----
 let selected = null; // agent username, or '__dispatcher__'
+let lastLogHtml = null; // skip DOM rebuilds when the log text is unchanged
 const overlay = document.getElementById('overlay'), dlog = document.getElementById('dlog');
 const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
 const lineClass = l => l.includes(' srv: ')?'srv' : /error|kicked|gave up|failed/.test(l)?'err' : l.includes(' thinks: ')?'think' : /\s->\s/.test(l)?'tool' : '';
-function openDetail(name){ selected = name; overlay.classList.add('show'); renderDetail(true); }
+function openDetail(name){ selected = name; lastLogHtml = null; overlay.classList.add('show'); renderDetail(true); }
 function closeDetail(){ selected = null; overlay.classList.remove('show'); }
 document.getElementById('dclose').addEventListener('click', closeDetail);
 overlay.addEventListener('click', e => { if (e.target === overlay) closeDetail(); });
@@ -108,8 +109,14 @@ async function renderDetail(reset){
   document.getElementById('dname').textContent = isDisp ? (s&&s.username||'dispatcher') : selected;
   document.getElementById('dstate').textContent = s ? (isDisp ? (s.online?'connected':'disconnected') : (s.state||'') + (s.goal?(' — '+s.goal):'')) : 'unavailable';
   const log = (s&&s.log)||[];
+  const html = log.map(l => '<span class="'+lineClass(l)+'">'+esc(l)+'</span>').join('\\n') || '<span class=muted>no activity yet</span>';
+  // Don't rebuild the DOM when nothing changed, or while text is selected (rebuilding clears the selection mid-copy).
+  const sel = window.getSelection();
+  const selecting = sel && !sel.isCollapsed && dlog.contains(sel.anchorNode);
+  if (!reset && (html === lastLogHtml || selecting)) return;
   const atBottom = dlog.scrollHeight - dlog.scrollTop - dlog.clientHeight < 40;
-  dlog.innerHTML = log.map(l => '<span class="'+lineClass(l)+'">'+esc(l)+'</span>').join('\\n') || '<span class=muted>no activity yet</span>';
+  lastLogHtml = html;
+  dlog.innerHTML = html;
   if (reset || atBottom) dlog.scrollTop = dlog.scrollHeight;
 }
 async function tick(){

@@ -1,4 +1,4 @@
-import { obj, type Skill, type SkillContext } from "./skillkit.js";
+import { obj, rel, type Skill, type SkillContext } from "./skillkit.js";
 import { Vec3, equipBestTool, goals, sleep } from "./deps.js";
 
 /** Consumed ingredients of a recipe as id→count, from delta/ingredients/inShape. */
@@ -215,7 +215,7 @@ export const skills: Skill[] = [
   {
     tool: {
       name: "craft_station",
-      description: "Ensure a crafting_table, furnace, or blast_furnace is placed within reach. Returns its coordinates or a clear error.",
+      description: "Ensure a crafting_table, furnace, or blast_furnace is placed within reach. Returns its offset from you (+x east, +y up, +z south) or a clear error.",
       input_schema: obj({ station: { type: "string", enum: ["crafting_table", "furnace", "blast_furnace"] } }, ["station"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -224,7 +224,7 @@ export const skills: Skill[] = [
       const itemDef = mcData.itemsByName[input.station];
       if (!blockDef || !itemDef) return `unknown station "${input.station}"`;
       const existing = bot.findBlock({ matching: blockDef.id, maxDistance: 4 });
-      if (existing) return `${input.station} already at (${existing.position.x}, ${existing.position.y}, ${existing.position.z})`;
+      if (existing) return `${input.station} already at ${rel(bot.entity.position, existing.position)}`;
       try {
         let held = bot.inventory.items().find((i: any) => i.name === input.station);
         if (!held) {
@@ -243,7 +243,7 @@ export const skills: Skill[] = [
           if (t && t.name === "air" && below && below.name !== "air" && !below.name.includes("lava")) {
             await bot.equip(held, "hand");
             await bot.placeBlock(below, new Vec3(0, 1, 0));
-            return `placed ${input.station} at (${target.x}, ${target.y}, ${target.z})`;
+            return `placed ${input.station} at ${rel(bot.entity.position, target)}`;
           }
         }
         return `error: no valid spot to place ${input.station} nearby`;

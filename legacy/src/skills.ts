@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "mineflayer";
 import type { Vec3 as Vec3T } from "vec3";
-import { obj, SHARED_SCOPE, type SkillContext } from "./skillkit.js";
+import { obj, rel, SHARED_SCOPE, type SkillContext } from "./skillkit.js";
 import { ALL_BEHAVIORS, ALL_SKILLS } from "./registry.js";
 import { Vec3, equipBestTool, goals, nearestHostile, sleep, withTimeout } from "./deps.js";
 import { RoutineError, referencedTools, runSteps, type RunCtx } from "./routines.js";
@@ -45,9 +45,10 @@ const BASE_TOOLS: Anthropic.Tool[] = [
   { name: "list_inventory", description: "List everything the bot is carrying.", input_schema: obj({}, []) },
   {
     name: "find_blocks",
-    description: "Locate the nearest blocks of a type (e.g. oak_log, stone, iron_ore). Returns coordinates.",
+    description: "Locate the nearest blocks of a type (e.g. oak_log, stone, iron_ore). Returns each as a signed offset from you (+x east, +y up, +z south) with distance, e.g. \"+5 -2 +3 (6m)\". Add an offset to your position (get_position) to get an absolute coordinate for go_to/mine_block.",
     input_schema: obj({ name: { type: "string" }, count: { type: "integer" }, max_distance: { type: "integer" } }, ["name", "count", "max_distance"]),
   },
+  { name: "get_position", description: "Read your current absolute world coordinates (x, y, z). find_blocks and similar report locations as offsets from you; add them to this for absolute coordinates.", input_schema: obj({}, []) },
   { name: "go_to", description: "Walk to a coordinate.", input_schema: obj({ x: { type: "integer" }, y: { type: "integer" }, z: { type: "integer" } }, ["x", "y", "z"]) },
   { name: "go_to_player", description: "Walk to within 2 blocks of a named player.", input_schema: obj({ username: { type: "string" } }, ["username"]) },
   { name: "go_toward", description: "Travel up to <distance> blocks toward a heading: a cardinal direction (north/south/east/west) or the nearest block of a named type (e.g. oak_log). Best-effort relocation when go_to/collect_block can't path to an exact spot; reports where you end up.", input_schema: obj({ target: { type: "string" }, distance: { type: "integer" } }, ["target", "distance"]) },
@@ -149,7 +150,14 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
         if (!block) return `unknown block "${input.name}"`;
         const found: Vec3T[] = bot.findBlocks({ matching: block.id, maxDistance: input.max_distance, count: input.count });
         if (found.length === 0) return `no ${input.name} within ${input.max_distance}m`;
-        return found.map((v) => `(${v.x}, ${v.y}, ${v.z})`).join("; ");
+        const from = bot.entity.position;
+        return found.map((v) => rel(from, v)).join("; ");
+      }
+
+      case "get_position": {
+        const p = bot.entity?.position;
+        if (!p) return "position unknown";
+        return `(${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)})`;
       }
 
       case "go_to":

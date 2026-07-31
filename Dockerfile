@@ -1,17 +1,23 @@
-FROM node:24-slim AS builder
+# Rust/azalea build. The crate lives at the repo root; rust-toolchain.toml pins nightly-2026-02-03
+# (azalea needs nightly for simdnbt), and Cargo.lock pins the RustCrypto pre-releases that
+# make azalea 0.15.1 resolve. Build honors both with --locked.
+FROM rust:1-bookworm AS builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY tsconfig.json ./
+# Toolchain + manifests first so the heavy dep compile (azalea + Bevy) caches across src edits.
+COPY rust-toolchain.toml ./rust-toolchain.toml
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo 'fn main() {}' > src/main.rs \
+    && cargo build --release --locked \
+    && rm -rf src target/release/deps/minecraft_agents* target/release/minecraft-agents
+# Real sources; only this layer rebuilds on code changes.
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
+RUN cargo build --release --locked
 
-FROM node:24-slim
-WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY package.json ./
+# Slim runtime: azalea uses rustls + bundled sqlite, so only CA certs are needed (HTTPS to the LLM APIs).
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/minecraft-agents /usr/local/bin/minecraft-agents
+ENV PORT=8080
 EXPOSE 8080
-CMD ["node", "dist/index.js"]
+CMD ["minecraft-agents"]

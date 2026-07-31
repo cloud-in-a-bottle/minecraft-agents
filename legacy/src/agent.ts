@@ -10,12 +10,14 @@ const SYSTEM = `You control a single Minecraft bot through a fixed set of skills
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
 Rules:
 - Decompose the goal into short, concrete steps. Long-horizon plans fail; act, observe, adjust.
+- Before each tool call, output one short sentence saying what you're doing and why.
 - Never invent coordinates — use find_blocks to locate things before moving or mining.
 - go_to and collect_block only path reliably within ~32 blocks. For anything farther, close the gap in stages with go_toward (a cardinal direction or a block type), then act.
 - If a skill returns an error, try a different concrete approach rather than repeating it.
 - You can only talk to your owner and to fellow agents owned by them: use "message" to reach one, "message_team" to reach all your teammates. There is no public chat.
 - Owner messages appear as OWNER:, teammate messages as AGENT <name>:, and damage as a "took N damage" note — respond to these.
-- Before a large or repetitive task, build your tools first: check list_routines to reuse one, otherwise author a routine with save_routine, then run_routine — this runs many steps with no per-step planning. Routines and settings are a shared library across all agents.
+- Routines are how your work gets reused — players mostly want a saved, replayable procedure, not a one-off. Whenever a goal is repeatable, author one instead of doing ad-hoc steps.
+- To build one: check list_routines first (the library is shared across all agents and owners — reuse or extend an existing routine), otherwise save_routine then run_routine. Parameterize everything variable with {param} placeholders (block, count, direction, coordinates) and give it a clear name + description — that is how players find and rerun it. Cover the whole job in one routine (locate, gather, craft, deposit), and make it robust with until/when/repeat loops and stop_on_error (grammar is in save_routine).
 - To react automatically to conditions (low food/health, etc.), create a setting once with create_setting (e.g. food<14 -> collect and eat food); it runs on its own until you delete it.
 - Call task_complete as soon as the goal is met or is clearly impossible.`;
 
@@ -147,12 +149,17 @@ export class Agent {
 
     bot.once("spawn", () => {
       this.mcData = mcDataLoader(bot.version);
-      bot.pathfinder.setMovements(new Movements(bot));
+      // Cheaper A* = shorter synchronous bursts = the physics tick fires on time, so
+      // movement doesn't stutter on-server when many bots share the one event loop.
+      const moves = new Movements(bot);
+      moves.allowParkour = false; // parkour balloons the branching factor (and jump-hops read as choppy)
+      moves.allow1by1towers = false; // pillar-up looks like teleporting and trips anti-cheat
+      bot.pathfinder.setMovements(moves);
       // A* is synchronous on the shared event loop; keep each bot's slice small so
       // concurrent bots don't starve each other, and bound runaway searches.
-      bot.pathfinder.tickTimeout = 10; // ms/tick spent pathfinding (default 40)
-      bot.pathfinder.thinkTimeout = 3000; // give up a single search sooner (default 5000)
-      (bot.pathfinder as any).searchRadius = 128; // don't A* the whole world for far/blocked goals
+      bot.pathfinder.tickTimeout = 5; // ms/tick spent pathfinding (default 40); smaller = smoother physics
+      bot.pathfinder.thinkTimeout = 2000; // give up a single search sooner (default 5000)
+      (bot.pathfinder as any).searchRadius = 64; // bound per-search cost; go_toward stages far goals
       this.behaviors.add("defend"); // eat-when-hungry + defend-when-attacked are always on by default
       this.behaviors.add("auto_eat");
       (bot as any)._behaviors = this.behaviors;
