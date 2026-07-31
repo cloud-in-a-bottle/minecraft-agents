@@ -3,3 +3,8 @@ dist
 *.log
 .env
 target
+
+# Runtime + agent-authored state — never in git, so updating the harness never
+# destroys previously built skills. Holds the SQLite memory DB and the shared
+# library of bot-authored routines + reactive settings (data/library/**).
+/data/
