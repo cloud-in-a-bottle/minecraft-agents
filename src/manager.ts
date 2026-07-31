@@ -1,7 +1,8 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { Agent } from "./agent.js";
 import { Dispatcher } from "./dispatcher.js";
 import { type PeerApi, type SkillEnv } from "./skillkit.js";
+import { FileRuleStore } from "./rulestore.js";
+import { MODELS, normalizeModel } from "./config.js";
 import type { Store } from "./store.js";
 import type { AppConfig, AgentStatus, BatchResult, BotSpec, CreateResult, SpawnResult } from "./types.js";
 
@@ -10,14 +11,16 @@ export class BotManager {
   private readonly agents = new Map<string, Agent>();
   private readonly dispatcher: Dispatcher;
   private readonly env: SkillEnv;
-  private readonly client: Anthropic; // one client shared by the whole fleet
+  private readonly keys: { anthropic: string; openai: string }; // planner keys shared by the fleet
+  private readonly rules: FileRuleStore;
   private nextNumber: number;
   private maxPerUser: number;
 
   constructor(private readonly config: AppConfig, private readonly store: Store) {
     this.loadSettings(); // durable settings override the env-var seed
     this.maxPerUser = config.maxPerUser;
-    this.client = new Anthropic({ apiKey: config.llm.apiKey });
+    this.keys = { anthropic: config.llm.apiKey, openai: config.llm.openaiApiKey };
+    this.rules = new FileRuleStore(config.rulesDir);
     const peers: PeerApi = {
       position: (name) => this.agents.get(name)?.position() ?? null,
       online: (name) => !!this.agents.get(name)?.isOnline(),
@@ -27,9 +30,12 @@ export class BotManager {
         a.inject(`AGENT ${from}: ${message}`);
         return true;
       },
+      ownerOf: (name) => { const a = this.agents.get(name); return a ? a.owner : undefined; },
+      teammates: (owner) =>
+        owner === null ? [] : [...this.agents.entries()].filter(([, a]) => a.owner === owner && a.isOnline()).map(([name]) => name),
       summon: (count, goal, owner) => this.createNew(count, goal, owner),
     };
-    this.env = { memory: store, peers, routines: store };
+    this.env = { memory: store, peers, routines: store, rules: this.rules };
     this.dispatcher = new Dispatcher(config.dispatcherName, config.mc, config.commandAllowlist, {
       createNew: (count, goal, owner) => this.createNew(count, goal, owner),
       assignExisting: (nums, goal, owner) => this.assignExisting(nums, goal, owner),
@@ -48,10 +54,12 @@ export class BotManager {
     const port = store.getSetting("mcPort");
     const login = store.getSetting("loginMessage");
     const cap = store.getSetting("maxPerUser");
+    const model = store.getSetting("model");
     if (host) config.mc.host = host;
     if (port) config.mc.port = Number(port);
     if (login != null) config.mc.loginMessage = login;
     if (cap != null) config.maxPerUser = Number(cap);
+    if (model) try { config.llm.model = normalizeModel(model); } catch { /* stale/invalid persisted model */ }
   }
 
   /** Recreate persisted owned numbers as offline placeholders so ownership survives restarts. */
@@ -66,7 +74,7 @@ export class BotManager {
   }
 
   private create(spec: BotSpec, owner: string | null): Agent {
-    const agent = new Agent(spec, this.config.mc, this.config.llm, owner, this.env, this.client);
+    const agent = new Agent(spec, this.config.mc, this.config.llm, owner, this.env, this.keys);
     this.agents.set(spec.username, agent);
     return agent;
   }
@@ -97,21 +105,28 @@ export class BotManager {
   }
 
   /** Live settings shown/edited in the dashboard. */
-  getSettings(): { maxBots: number; maxPerUser: number; mcHost: string; mcPort: number; loginMessage: string } {
+  getSettings(): { maxBots: number; maxPerUser: number; mcHost: string; mcPort: number; loginMessage: string; model: string; models: string[] } {
     return {
       maxBots: this.config.maxBots,
       maxPerUser: this.maxPerUser,
       mcHost: this.config.mc.host,
       mcPort: this.config.mc.port,
       loginMessage: this.config.mc.loginMessage,
+      model: this.config.llm.model,
+      models: [...MODELS],
     };
   }
 
-  /** Apply a live settings patch, persisting each change. Host/port/login changes reconnect the fleet. */
-  updateSettings(patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string }): void {
+  /** Apply a live settings patch, persisting each change. Host/port/login changes reconnect the fleet; the model applies to each worker's next task. */
+  updateSettings(patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string; model?: string }): void {
     if (patch.maxPerUser != null) {
       this.maxPerUser = Math.max(0, Math.floor(patch.maxPerUser));
       this.store.setSetting("maxPerUser", String(this.maxPerUser));
+    }
+    if (patch.model != null) {
+      const model = normalizeModel(patch.model); // throws on an unknown model
+      this.config.llm.model = model;
+      this.store.setSetting("model", model);
     }
     let reconnect = false;
     if (patch.mcHost != null && patch.mcHost !== this.config.mc.host) { this.config.mc.host = patch.mcHost; this.store.setSetting("mcHost", patch.mcHost); reconnect = true; }

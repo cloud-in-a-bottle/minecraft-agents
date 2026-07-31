@@ -25,6 +25,7 @@ export interface SkillContext {
   memory: Memory;
   peers: PeerApi;
   routines: RoutineStore;
+  rules: RuleStore;
   self: { username: string; owner: string | null };
   behaviors: Set<string>;
 }
@@ -47,6 +48,10 @@ export interface PeerApi {
   position(name: string): Pos | null;
   online(name: string): boolean;
   send(to: string, from: string, message: string): boolean;
+  /** Owner of a managed agent; null if unowned, undefined if not a managed agent. */
+  ownerOf(name: string): string | null | undefined;
+  /** Usernames of online agents sharing `owner` (null owner has no teammates). */
+  teammates(owner: string | null): string[];
   /** Summon helper workers charged to `owner`'s per-user cap (null = uncapped). */
   summon(count: number, goal: string, owner: string | null): CreateResult;
 }
@@ -55,6 +60,7 @@ export interface SkillEnv {
   memory: Memory;
   peers: PeerApi;
   routines: RoutineStore;
+  rules: RuleStore;
 }
 
 /** A saved, replayable procedure the agent composes from existing skills. `steps` is interpreted, not code. */
@@ -69,6 +75,21 @@ export interface RoutineStore {
   saveRoutine(scope: string, routine: Routine): void;
   getRoutine(scope: string, name: string): Routine | undefined;
   listRoutines(scope: string): { name: string; description: string }[];
+}
+
+/** A bot-authored reactive setting: when `condition` holds, run `steps` (a routine body). */
+export interface Rule {
+  name: string;
+  condition: string;
+  steps: any[];
+  enabled: boolean;
+}
+
+/** Durable rule library, scoped per owner. File-backed (a subdirectory, not the DB). */
+export interface RuleStore {
+  saveRule(scope: string, rule: Rule): void;
+  listRules(scope: string): Rule[];
+  deleteRule(scope: string, name: string): boolean;
 }
 
 export interface LedgerItem {

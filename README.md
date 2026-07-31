@@ -32,7 +32,8 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Planner key. **Local dev only** — in production it's pulled from the OpenHost **secrets** service at boot (grant the `ANTHROPIC_API_KEY` secret); see `openhost.toml`. |
+| `ANTHROPIC_API_KEY` | — | Claude planner key. **Local dev only** — in production it's pulled from the OpenHost **secrets** service at boot (grant the `ANTHROPIC_API_KEY` secret); see `openhost.toml`. |
+| `OPENAI_API_KEY` | — | OpenAI planner key, needed only when a bot uses the `gpt-5.6-luna` model. Resolved like `ANTHROPIC_API_KEY` (env var locally, else OpenHost secrets). |
 | `MC_HOST` | `localhost` | Server host — **also editable live in the dashboard** |
 | `MC_PORT` | `25565` | Server port — **also editable live in the dashboard** |
 | `MC_VERSION` | auto | Pin if auto-detect fails |
@@ -41,7 +42,7 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `DISPATCHER_NAME` | `agents` | Username of the always-on dispatcher players tag |
 | `BOT_COUNT` | `0` | Optional pre-spawned workers `agent_1`..`agent_N` (usually 0 — summon on demand) |
 | `BOTS_CONFIG` | — | Path to a JSON array of `{goal?, model?}` for pre-spawned workers; numbered `agent_1`.. by array order |
-| `LLM_MODEL` | `claude-haiku-4-5` | Planner model — only `claude-haiku-4-5` (`haiku`) or `claude-sonnet-5` (`sonnet`); thinking is always off |
+| `LLM_MODEL` | `claude-haiku-4-5` | Default planner model — `claude-haiku-4-5` (`haiku`), `claude-sonnet-5` (`sonnet`), or `gpt-5.6-luna` (`luna`, OpenAI). Provider is picked from the model id; thinking is always off. **Also selectable live in the dashboard** (applies to each worker's next task) |
 | `LLM_EFFORT` | `low` | `low`..`max` (Sonnet only; ignored by Haiku) |
 | `LLM_MAX_STEPS` | `40` | Skill calls per goal before the loop stops |
 | `COMMAND_ALLOWLIST` | — | Comma-separated usernames allowed to command `@<dispatcher>`; empty = anyone |
@@ -52,6 +53,7 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `DISPATCHER_RECYCLE_MIN` | `45` | Minutes between dispatcher reconnects to reset its accumulated chunk memory (it never logs out); `0` disables |
 | `PORT` | `8080` | HTTP port (matches `openhost.toml`) |
 | `DB_PATH` | `$OPENHOST_APP_DATA_DIR/minecraft-agents.db` | SQLite file for persisted state; falls back to `$DATA_DIR` then `./data` locally |
+| `RULES_DIR` | `$OPENHOST_APP_DATA_DIR/settings` | Directory holding bot-authored reactive settings (one JSON file per rule; not the DB) |
 
 Env vars **seed** the config; live settings (host, port, login, per-user cap)
 saved in the DB **override** them on the next boot (see Persistence below).
@@ -85,8 +87,9 @@ and health/food, with dispatcher status, fleet token + **traffic** totals in the
 header. Traffic = real Minecraft socket bytes (on-wire) per bot + approximate API
 request/response bytes; summed across all workers and the dispatcher. The header
 also has **live-editable controls** — the Minecraft server host/port and login
-message (staged, then **apply** together — this reconnects the fleet) and the
-per-user cap (inline). A colored dot shows whether the dispatcher is connected.
+message (staged, then **apply** together — this reconnects the fleet), the
+per-user cap (inline), and the **planner model** (dropdown; applies to each
+worker's next task, no restart). A colored dot shows whether the dispatcher is connected.
 **Click any row (or the dispatcher)** to open its log — spawn/kick reasons, server
 auth replies (`srv:`), and the step-by-step tool calls and results. The **per-user cap is
 editable inline** (header input → `POST /config`); it takes effect on the next
@@ -158,11 +161,15 @@ one event loop can only do so much.
 State lives in a SQLite DB (`node:sqlite`, no native build) on the OpenHost
 `app_data` volume (`$OPENHOST_APP_DATA_DIR`), written on every change:
 
-- **Settings** — server host/port, login message, per-user cap. Override the env
-  seed at boot, so dashboard edits survive a restart/redeploy.
+- **Dashboard settings** — server host/port, login message, per-user cap, planner
+  model. Override the env seed at boot, so dashboard edits survive a restart/redeploy.
 - **Ownership** — each `agent_N`'s owner, so owned/reserved numbers persist across
   restarts (offline placeholders are recreated at boot).
 - **Memory** — per-scope waypoints, notes, and the task ledger.
+- **Routines** — self-authored replayable procedures, scoped per owner.
+
+Bot-authored **reactive settings** (`create_setting`) live **outside** the DB, as
+one JSON file per rule under `RULES_DIR` (`settings/<owner>/<name>.json`).
 
 Agent logs, token/traffic counters, and live bot connections stay in-memory
 (diagnostic, high-churn). Delete the DB file to reset all persisted state.

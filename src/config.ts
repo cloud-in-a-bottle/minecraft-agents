@@ -11,17 +11,23 @@ function env(name: string, fallback?: string): string {
   return v;
 }
 
-/** Only Haiku 4.5 and Sonnet 5 are allowed (aliases accepted). */
+/** Allowed planners: Haiku 4.5, Sonnet 5 (Anthropic), and 5.6 Luna (OpenAI). Aliases accepted. */
 const MODEL_ALIASES: Record<string, string> = {
   haiku: "claude-haiku-4-5",
   "claude-haiku-4-5": "claude-haiku-4-5",
   sonnet: "claude-sonnet-5",
   "claude-sonnet-5": "claude-sonnet-5",
+  luna: "gpt-5.6-luna",
+  "5.6-luna": "gpt-5.6-luna",
+  "gpt-5.6-luna": "gpt-5.6-luna",
 };
 
-function normalizeModel(m: string): string {
+/** Canonical selectable planner models (for the dashboard dropdown). */
+export const MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gpt-5.6-luna"] as const;
+
+export function normalizeModel(m: string): string {
   const v = MODEL_ALIASES[m.trim().toLowerCase()];
-  if (!v) throw new Error(`model "${m}" not allowed; use claude-haiku-4-5 (haiku) or claude-sonnet-5 (sonnet)`);
+  if (!v) throw new Error(`model "${m}" not allowed; use claude-haiku-4-5 (haiku), claude-sonnet-5 (sonnet), or gpt-5.6-luna (luna)`);
   return v;
 }
 
@@ -52,6 +58,7 @@ export function loadConfig(): AppConfig {
   const llm: LlmConfig = {
     // Filled by resolveApiKey() at boot (env var for local dev, else OpenHost secrets).
     apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+    openaiApiKey: process.env.OPENAI_API_KEY ?? "",
     model: normalizeModel(env("LLM_MODEL", "claude-haiku-4-5")),
     effort: env("LLM_EFFORT", "low") as LlmConfig["effort"],
     maxSteps: Number(env("LLM_MAX_STEPS", "40")),
@@ -64,6 +71,7 @@ export function loadConfig(): AppConfig {
   return {
     port: Number(env("PORT", "8080")),
     dbPath: process.env.DB_PATH || join(dataDir, "minecraft-agents.db"),
+    rulesDir: process.env.RULES_DIR || join(dataDir, "settings"),
     mc,
     llm,
     bots: resolveBots(),

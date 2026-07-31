@@ -22,6 +22,7 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   .name { color:#fff; } .owner { color:#8b97a6; } .num { color:#aeb8c4; } .cache { color:#3fb950; }
   .muted { color:#6e7681; }
   header input { width:50px; background:#0e1116; color:#d6dde6; border:1px solid #2b333d; border-radius:4px; padding:2px 5px; font:inherit; }
+  header select { background:#0e1116; color:#d6dde6; border:1px solid #2b333d; border-radius:4px; padding:2px 5px; font:inherit; }
   header button { background:#238636; color:#fff; border:1px solid #2ea043; border-radius:4px; padding:3px 12px; font:inherit; cursor:pointer; }
   header button:disabled { background:#21262d; color:#6e7681; border-color:#2b333d; cursor:default; }
   .conn { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; }
@@ -47,6 +48,7 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   <span class=stat>login <input id=login type=text placeholder="/login <pw>" style="width:200px" title="sent on join; two-step with &&, e.g. /register <pw> <pw> && /login <pw>"></span>
   <button id=apply disabled title="reconnects the fleet">apply</button>
   <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon, no restart"></span>
+  <span class=stat>model <select id=model title="planner for new tasks; applies to each worker's next task, no restart"></select></span>
   <span class=stat muted id=upd></span>
 </header>
 <div id=wrap><table>
@@ -61,10 +63,12 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
 const k = n => n>=1000 ? (n/1000).toFixed(n>=10000?0:1)+'k' : String(n||0);
 const fb = n => { n=n||0; if(n>=1e9)return (n/1e9).toFixed(2)+'GB'; if(n>=1e6)return (n/1e6).toFixed(1)+'MB'; if(n>=1e3)return (n/1e3).toFixed(0)+'KB'; return n+'B'; };
 const capEl = document.getElementById('cap');
+const modelEl = document.getElementById('model');
 const hostEl = document.getElementById('host'), portEl = document.getElementById('port'), loginEl = document.getElementById('login');
 const applyEl = document.getElementById('apply');
 const postCfg = patch => fetch('/config', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(patch) });
 capEl.addEventListener('change', () => { const v=Number(capEl.value); if(v>=0) postCfg({ maxPerUser: v }); });
+modelEl.addEventListener('change', () => postCfg({ model: modelEl.value }));
 // Server host/port/login are staged and applied together (they reconnect the fleet).
 let dirty = false;
 const markDirty = () => { dirty = true; applyEl.disabled = false; applyEl.textContent = 'apply'; };
@@ -111,6 +115,9 @@ async function tick(){
       fetch('/config').then(r=>r.json()).catch(()=>({})),
     ]);
     if (document.activeElement !== capEl && cfg.maxPerUser != null) capEl.value = cfg.maxPerUser;
+    if (Array.isArray(cfg.models) && modelEl.options.length !== cfg.models.length)
+      modelEl.innerHTML = cfg.models.map(m => '<option value="'+m+'">'+m+'</option>').join('');
+    if (document.activeElement !== modelEl && cfg.model != null) modelEl.value = cfg.model;
     if (!dirty) {  // don't clobber staged edits before they're applied
       if (cfg.mcHost != null) hostEl.value = cfg.mcHost;
       if (cfg.mcPort != null) portEl.value = cfg.mcPort;
@@ -168,7 +175,7 @@ export function createApi(manager: BotManager): express.Express {
   // Live-editable settings; no restart. Host/port/login changes reconnect the fleet.
   app.post("/config", (req, res) => {
     const b = req.body ?? {};
-    const patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string } = {};
+    const patch: { maxPerUser?: number; mcHost?: string; mcPort?: number; loginMessage?: string; model?: string } = {};
     if (b.maxPerUser !== undefined) {
       const n = Number(b.maxPerUser);
       if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: "maxPerUser must be a number >= 0" });
@@ -187,7 +194,15 @@ export function createApi(manager: BotManager): express.Express {
       if (typeof b.loginMessage !== "string") return res.status(400).json({ error: "loginMessage must be a string" });
       patch.loginMessage = b.loginMessage;
     }
-    manager.updateSettings(patch);
+    if (b.model !== undefined) {
+      if (typeof b.model !== "string") return res.status(400).json({ error: "model must be a string" });
+      patch.model = b.model;
+    }
+    try {
+      manager.updateSettings(patch);
+    } catch (err) {
+      return res.status(400).json({ error: (err as Error).message });
+    }
     res.json(manager.getSettings());
   });
 

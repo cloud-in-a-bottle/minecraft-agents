@@ -2,8 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "mineflayer";
 import type { AgentState, AgentStatus, BotSpec, LlmConfig, McConfig } from "./types.js";
 import type { Pos, SkillContext, SkillEnv } from "./skillkit.js";
+import { type Planner, plannerFor } from "./llm.js";
 import { TOOLS, execute, installAutoBehaviors, observe, summarizeResult } from "./skills.js";
-import { Movements, Reconnector, collectBlock, installAuth, kickReason, logLine, logServerMessages, mcDataLoader, mineflayer, pathfinder, pvp, safeQuit, socketBytes, startChunkPrune } from "./deps.js";
+import { Movements, Reconnector, collectBlock, installAuth, kickReason, logLine, logServerMessages, mcDataLoader, mineflayer, nearestHostile, pathfinder, pvp, safeQuit, socketBytes, startChunkPrune } from "./deps.js";
 
 const SYSTEM = `You control a single Minecraft bot through a fixed set of skills (tools).
 Pursue the assigned GOAL by calling one skill at a time and reading the result and the CURRENT STATE that follows each result.
@@ -11,8 +12,10 @@ Rules:
 - Decompose the goal into short, concrete steps. Long-horizon plans fail; act, observe, adjust.
 - Never invent coordinates — use find_blocks to locate things before moving or mining.
 - If a skill returns an error, try a different concrete approach rather than repeating it.
-- When the owner sends a message (shown as OWNER:) or asks a question, reply with whisper (private) or say_to (public @mention).
+- You can only talk to your owner and to fellow agents owned by them: use "message" to reach one, "message_team" to reach all your teammates. There is no public chat.
+- Owner messages appear as OWNER:, teammate messages as AGENT <name>:, and damage as a "took N damage" note — respond to these.
 - For repetitive work (gathering, crafting chains), save a routine once with save_routine, then run_routine to execute it without planning each step; check list_routines first to reuse one.
+- To react automatically to conditions (low food/health, etc.), create a setting once with create_setting (e.g. food<14 -> collect and eat food); it runs on its own until you delete it.
 - Call task_complete as soon as the goal is met or is clearly impossible.`;
 
 // Cached prefix: tools render before system, so a breakpoint here caches tools + system.
@@ -40,7 +43,9 @@ export class Agent {
   private effortOk = true;
   private thinkingOk = true;
   private readonly injected: string[] = [];
-  private readonly behaviors = new Set<string>();
+  // defend + auto_eat are on by default; the planner can toggle any behavior.
+  private readonly behaviors = new Set<string>(["defend", "auto_eat"]);
+  private lastHealth = 20;
   private readonly log: string[] = [];
   private readonly reconnector = new Reconnector(
     4,
@@ -51,15 +56,18 @@ export class Agent {
     },
   );
 
+  private planner: Planner;
+
   constructor(
     private readonly spec: BotSpec,
     private readonly mc: McConfig,
     private readonly llm: LlmConfig,
     public owner: string | null = null,
     private readonly env: SkillEnv,
-    private readonly client: Anthropic, // one shared client for the whole fleet
+    private readonly keys: { anthropic: string; openai: string }, // planner keys shared by the fleet
   ) {
     this.goal = spec.goal ?? null;
+    this.planner = plannerFor(spec.model ?? llm.model, keys);
   }
 
   private makeCtx(): SkillContext {
@@ -69,6 +77,7 @@ export class Agent {
       memory: this.env.memory,
       peers: this.env.peers,
       routines: this.env.routines,
+      rules: this.env.rules,
       self: { username: this.spec.username, owner: this.owner },
       behaviors: this.behaviors,
     };
@@ -84,6 +93,18 @@ export class Agent {
   inject(message: string): void {
     this.injected.push(message);
     this.note(`inbox: ${message}`);
+  }
+
+  /** Notify the planner when the bot loses health, naming a nearby hostile if any. */
+  private onHealthChange(bot: Bot): void {
+    const h = bot.health ?? this.lastHealth;
+    if (h < this.lastHealth) {
+      const dmg = Math.round(this.lastHealth - h);
+      const threat = nearestHostile(bot, 8);
+      const from = threat ? ` (hostile nearby: ${threat.name})` : "";
+      this.inject(`took ${dmg} damage, health now ${Math.round(h)}/20${from}`);
+    }
+    this.lastHealth = h;
   }
 
   /** Perception + durable memory summary, fed to the planner each step. */
@@ -139,6 +160,8 @@ export class Agent {
     installAuth(bot, () => this.mc.loginMessage, (m) => this.note(m));
     bot.on("chat", (username, message) => this.onOwnerChat(username, message));
     bot.on("whisper", (username, message) => this.onWhisper(username, message));
+    this.lastHealth = bot.health ?? 20;
+    bot.on("health", () => this.onHealthChange(bot));
     bot.on("kicked", (reason) => this.note(`kicked: ${kickReason(reason)}`));
     bot.on("error", (err) => this.note(`error: ${err.message}`));
     bot.on("end", () => {
@@ -171,7 +194,7 @@ export class Agent {
   /** Steer a running task (inject a prompt) or, if idle, start it as a new goal. */
   private steer(message: string): void {
     if (this.looping) {
-      this.injected.push(message);
+      this.injected.push(`OWNER: ${message}`);
       this.note(`owner prompt queued: ${message}`);
     } else {
       this.assign(message);
@@ -218,7 +241,7 @@ export class Agent {
   /** Send one request, accumulating approximate on-wire API bytes (uncompressed JSON). */
   private async send(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> {
     this.apiOut += JSON.stringify(params).length;
-    const res = await this.client.messages.create(params);
+    const res = await this.planner.create(params);
     this.apiIn += JSON.stringify(res).length;
     return res;
   }
@@ -247,6 +270,7 @@ export class Agent {
     this.step = 0;
     this.convSteps = 0;
     const model = this.spec.model ?? this.llm.model;
+    this.planner = plannerFor(model, this.keys); // re-pick so a live model change applies next task
     const goal = this.goal;
     // `content` holds the full result while recent, then is replaced in place by its summary
     // once the step leaves the KEEP_FULL window — the full string is dropped, not retained.
@@ -272,7 +296,7 @@ export class Agent {
           msgs.push({ role: "user", content: isLast ? [...results, { type: "text", text: `CURRENT STATE:\n${this.stateText()}` }] : results });
         });
       }
-      if (this.injected.length) msgs.push({ role: "user", content: this.injected.splice(0).map((m) => `OWNER: ${m}`).join("\n") });
+      if (this.injected.length) msgs.push({ role: "user", content: this.injected.splice(0).join("\n") });
       return msgs;
     };
 

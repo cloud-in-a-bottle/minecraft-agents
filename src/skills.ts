@@ -5,6 +5,7 @@ import { obj, scopeOf, type SkillContext } from "./skillkit.js";
 import { ALL_BEHAVIORS, ALL_SKILLS } from "./registry.js";
 import { Vec3, goals, nearestHostile, sleep, withTimeout } from "./deps.js";
 import { RoutineError, referencedTools, runSteps, type RunCtx } from "./routines.js";
+import { RuleEngine } from "./rules.js";
 
 /** Compact perception snapshot fed to the planner every step. */
 export function observe(bot: Bot): string {
@@ -28,9 +29,6 @@ export function observe(bot: Bot): string {
 }
 
 const BASE_TOOLS: Anthropic.Tool[] = [
-  { name: "chat", description: "Send a message to public chat (everyone).", input_schema: obj({ message: { type: "string" } }, ["message"]) },
-  { name: "say_to", description: "Reply to a player in public chat, addressed as @<player>.", input_schema: obj({ player: { type: "string" }, message: { type: "string" } }, ["player", "message"]) },
-  { name: "whisper", description: "Reply privately to a player (/msg).", input_schema: obj({ player: { type: "string" }, message: { type: "string" } }, ["player", "message"]) },
   { name: "list_inventory", description: "List everything the bot is carrying.", input_schema: obj({}, []) },
   {
     name: "find_blocks",
@@ -118,18 +116,6 @@ type Input = Record<string, any>;
 export async function execute(bot: Bot, mcData: any, name: string, input: Input, ctx: SkillContext): Promise<string> {
   try {
     switch (name) {
-      case "chat":
-        bot.chat(String(input.message));
-        return "message sent";
-
-      case "say_to":
-        bot.chat(`@${input.player} ${input.message}`);
-        return `replied to ${input.player} in chat`;
-
-      case "whisper":
-        (bot as any).whisper(input.player, input.message);
-        return `whispered ${input.player}`;
-
       case "list_inventory":
         return bot.inventory.items().map((i) => `${i.name}x${i.count}`).join(", ") || "inventory empty";
 
@@ -400,7 +386,7 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
   }
 }
 
-/** Wires background toggles. Built-in defend/auto_eat plus any registered BehaviorHandlers. */
+/** Wires background toggles. Built-in defend/auto_eat, registered BehaviorHandlers, and bot-authored rules. */
 export function installAutoBehaviors(bot: Bot, getMcData: () => any, isFriendly: (name: string) => boolean, makeCtx: () => SkillContext): void {
   let lastHealth = bot.health ?? 20;
   bot.on("health", () => {
@@ -411,9 +397,11 @@ export function installAutoBehaviors(bot: Bot, getMcData: () => any, isFriendly:
     for (const h of ALL_BEHAVIORS) if (h.onHealth && behaviors.has(h.name)) try { h.onHealth(ctx); } catch { /* ignore */ }
     lastHealth = bot.health;
   });
+  const rules = new RuleEngine();
   const tick = setInterval(() => {
     const ctx = makeCtx();
     for (const h of ALL_BEHAVIORS) if (h.onTick && ctx.behaviors.has(h.name)) try { h.onTick(ctx); } catch { /* ignore */ }
+    rules.tick(ctx, (tool, a) => execute(bot, getMcData(), tool, a, ctx));
   }, 1000);
   bot.once("end", () => clearInterval(tick));
 }

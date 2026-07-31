@@ -12,8 +12,9 @@ waypoint names). Navigation uses `mineflayer-pathfinder` (A\*), not Baritone;
 sustained combat uses `mineflayer-pvp`.
 
 Base tools live in `src/skills.ts`; the rest are pluggable modules
-(`src/skills_iron.ts`, `_memory.ts`, `_survival.ts`, `_multiagent.ts`) registered
-through `src/skillkit.ts`.
+(`src/skills_iron.ts`, `_memory.ts`, `_survival.ts`, `_multiagent.ts`, plus the
+`src/skills/` subdirectory — `presence.ts`, `messaging.ts`, `rules.ts`)
+aggregated in `src/registry.ts`.
 
 ## Perceive
 
@@ -25,6 +26,7 @@ through `src/skillkit.ts`.
 | `top_down` | — | 5×5 heightmap: first block down per column, height vs. ground (eye `+2`, waist `+1`, ground `0`, below negative) |
 | `match_block_names` | `pattern, limit` | Block names matching a regex |
 | `match_item_names` | `pattern, limit` | Item names matching a regex (for craft/equip/give) |
+| `who_online` | — | Players currently in the tab list, with each one's ping |
 
 ## Recipes & knowledge
 
@@ -97,29 +99,48 @@ into perception each step, so plans survive the step budget.
 | `collect_drops` | `radius` | Walk to and pick up dropped items nearby |
 | `give_item` | `target, item, count` | Toss items to another agent or player |
 | `go_to_agent` | `agent, range` | Pathfind to another worker's live position |
-| `send_agent_message` | `agent, message` | Deliver an in-process message to another worker (no game chat) |
 
 ## Background behaviors
 
 `set_behavior {behavior, enabled}` toggles a behavior that runs on its own until
-turned off. Persists across a worker's reconnects.
+turned off. Persists across a worker's reconnects. **`defend` and `auto_eat` are
+on by default**; the rest are opt-in.
 
 | Behavior | Does |
 |---|---|
-| `defend` | On damage, hit back the nearest attacker (mob or non-friendly player; never owner/other agents) |
-| `auto_eat` | Eat any food when hunger drops to ≤14 |
+| `defend` | *(default on)* On damage, hit back the nearest attacker (mob or non-friendly player; never owner/other agents) |
+| `auto_eat` | *(default on)* Eat any food when hunger drops to ≤14 |
 | `maintain_light` | Place a torch when standing in low light and carrying one |
 | `retreat_if_low_health` | At health ≤7, disengage and flee the nearest hostile |
 | `lava_guard` | Stop and step back when lava or a big drop is imminent ahead |
 | `anti_stuck` | Detect a stalled pathfind and nudge (jump / dig ahead) to recover |
 
-## Talk
+## Talk (locked to owner + teammates)
+
+Bots have **no public chat**. A worker can only message its **owner** and **fellow
+agents owned by the same player**. Incoming owner/teammate messages — and a
+"took N damage" note whenever the bot is hurt — are injected into the planning loop.
 
 | Tool | Inputs | Does |
 |---|---|---|
-| `chat` | `message` | Public chat (everyone) |
-| `say_to` | `player, message` | Public chat addressed `@<player>` |
-| `whisper` | `player, message` | Private `/msg` to a player |
+| `message` | `to, message` | Private message to your owner (in-game `/msg`) or a same-owner teammate agent (in-process). Any other target is refused |
+| `message_team` | `message` | Broadcast an in-process message to every online same-owner teammate agent |
+
+## Settings (self-authored reactive rules)
+
+Condition→action rules the bot writes for itself; evaluated every second and fired
+when the condition holds (10 s per-rule cooldown). Persisted as JSON **files** under
+the app's `settings/` directory (one file per rule, scoped per owner) — **not the DB**.
+
+| Tool | Inputs | Does |
+|---|---|---|
+| `create_setting` | `name, condition, steps` | Save a rule: when `condition` holds, run `steps` (same grammar as `save_routine`). E.g. `food<14` → collect + eat food |
+| `list_settings` | — | List rules (name, on/off, condition) |
+| `toggle_setting` | `name, enabled` | Enable or disable a rule |
+| `delete_setting` | `name` | Remove a rule |
+
+Conditions use the routine grammar: `have:<item><op>N`, `find:<block><op>N`,
+`health<op>N`, `food<op>N` (op ∈ `>= <= > < == !=`).
 
 ## Routines (self-authored procedures)
 

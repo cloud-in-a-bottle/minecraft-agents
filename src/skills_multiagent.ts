@@ -107,19 +107,4 @@ export const skills: Skill[] = [
       }
     },
   },
-  {
-    tool: {
-      name: "send_agent_message",
-      description: "Send an in-process message to another agent's planning loop (coordination, no game chat).",
-      input_schema: obj({ agent: { type: "string" }, message: { type: "string" } }, ["agent", "message"]),
-    },
-    run: async (ctx: SkillContext, input): Promise<string> => {
-      try {
-        const ok = ctx.peers.send(input.agent, ctx.self.username, String(input.message));
-        return ok ? `delivered to ${input.agent}` : `${input.agent} not online`;
-      } catch (err) {
-        return `error: ${(err as Error).message}`;
-      }
-    },
-  },
 ];

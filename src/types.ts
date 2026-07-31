@@ -22,6 +22,8 @@ export interface McConfig {
 
 export interface LlmConfig {
   apiKey: string;
+  /** OpenAI key, resolved like `apiKey`; empty unless an OpenAI model is used. */
+  openaiApiKey: string;
   model: string;
   effort: "low" | "medium" | "high" | "xhigh" | "max";
   maxSteps: number;
@@ -38,6 +40,8 @@ export interface AppConfig {
   port: number;
   /** SQLite file for settings, ownership, and memory (OpenHost app-data dir). */
   dbPath: string;
+  /** Directory holding bot-authored reactive settings (one JSON file per rule; not the DB). */
+  rulesDir: string;
   mc: McConfig;
   llm: LlmConfig;
   bots: BotSpec[];
