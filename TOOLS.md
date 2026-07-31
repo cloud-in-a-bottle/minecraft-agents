@@ -129,8 +129,9 @@ agents owned by the same player**. Incoming owner/teammate messages — and a
 ## Settings (self-authored reactive rules)
 
 Condition→action rules the bot writes for itself; evaluated every second and fired
-when the condition holds (10 s per-rule cooldown). Persisted as JSON **files** under
-the app's `settings/` directory (one file per rule, scoped per owner) — **not the DB**.
+when the condition holds (10 s per-rule cooldown). Persisted as JSON **files** in the
+shared library (`library/settings/`), one file per rule, shared by **every** agent
+— **not the DB**.
 
 | Tool | Inputs | Does |
 |---|---|---|
@@ -147,8 +148,9 @@ Conditions use the routine grammar: `have:<item><op>N`, `find:<block><op>N`,
 Reusable, saved procedures the planner composes from the skills above — for
 repetitive work (gathering, crafting chains) it authors one, then replays it with
 **no per-step LLM calls**. Steps are interpreted data, not code (no `eval`), and
-may only call whitelisted skills. Saved per owner in SQLite, shared across that
-owner's agents. Execution is bounded by a step budget (300) and a 5-minute deadline.
+may only call whitelisted skills. Saved as JSON **files** in the shared library
+(`library/routines/`) — one collection shared by **every** agent, not the DB.
+Execution is bounded by a step budget (300) and a 5-minute deadline.
 
 | Tool | Inputs | Does |
 |---|---|---|

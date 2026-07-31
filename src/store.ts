@@ -1,10 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { LedgerItem, Memory, Pos, Routine, RoutineStore } from "./skillkit.js";
+import type { LedgerItem, Memory, Pos } from "./skillkit.js";
 
-/** SQLite persistence: live settings, agent ownership, durable per-scope memory, and routines. */
-export class Store implements Memory, RoutineStore {
+/** SQLite persistence: live settings, agent ownership, and durable per-scope memory. */
+export class Store implements Memory {
   private readonly db: DatabaseSync;
 
   constructor(path: string) {
@@ -17,7 +17,6 @@ export class Store implements Memory, RoutineStore {
       CREATE TABLE IF NOT EXISTS waypoints (scope TEXT, name TEXT, x REAL, y REAL, z REAL, PRIMARY KEY (scope, name));
       CREATE TABLE IF NOT EXISTS notes     (scope TEXT, name TEXT, value TEXT, PRIMARY KEY (scope, name));
       CREATE TABLE IF NOT EXISTS ledger    (scope TEXT, text TEXT, status TEXT, PRIMARY KEY (scope, text));
-      CREATE TABLE IF NOT EXISTS routines  (scope TEXT, name TEXT, description TEXT, steps TEXT, PRIMARY KEY (scope, name));
     `);
   }
 
@@ -67,22 +66,6 @@ export class Store implements Memory, RoutineStore {
   setLedgerItem(scope: string, text: string, status: LedgerItem["status"]): LedgerItem[] {
     this.db.prepare("INSERT INTO ledger(scope,text,status) VALUES(?,?,?) ON CONFLICT(scope,text) DO UPDATE SET status=excluded.status").run(scope, text, status);
     return this.ledger(scope);
-  }
-
-  // --- RoutineStore: saved, replayable procedures ---
-  saveRoutine(scope: string, routine: Routine): void {
-    this.db
-      .prepare("INSERT INTO routines(scope,name,description,steps) VALUES(?,?,?,?) ON CONFLICT(scope,name) DO UPDATE SET description=excluded.description, steps=excluded.steps")
-      .run(scope, routine.name, routine.description, JSON.stringify(routine.steps));
-  }
-  getRoutine(scope: string, name: string): Routine | undefined {
-    const r = this.db.prepare("SELECT name,description,steps FROM routines WHERE scope=? AND name=?").get(scope, name) as
-      | { name: string; description: string; steps: string }
-      | undefined;
-    return r ? { name: r.name, description: r.description, steps: JSON.parse(r.steps) } : undefined;
-  }
-  listRoutines(scope: string): { name: string; description: string }[] {
-    return this.db.prepare("SELECT name,description FROM routines WHERE scope=? ORDER BY name").all(scope) as { name: string; description: string }[];
   }
 
   /** Short text injected into perception each step so plans survive the step budget. */

@@ -13,6 +13,42 @@ function recipeIngredients(recipe: any): Map<number, number> {
   return m;
 }
 
+/** Material family: the last underscore segment (acacia_planks -> planks, dark_oak_log -> log). */
+function itemFamily(name: string): string {
+  const i = name.lastIndexOf("_");
+  return i >= 0 ? name.slice(i + 1) : name;
+}
+
+/**
+ * Merge a target's recipes into one, collapsing an ingredient slot that varies only by
+ * material family across recipes (e.g. any *_planks for a stick) into a wildcard label.
+ */
+function consolidateRecipe(recipes: any[], mcData: any): { out: number; requiresTable: boolean; ingredients: string[] } {
+  const nameOf = (id: number): string => mcData.items[id]?.name ?? String(id);
+  const signature = (r: any): string =>
+    [...recipeIngredients(r)].map(([id, c]) => `${itemFamily(nameOf(id))}:${c}`).sort().join(",");
+  // The largest group of same-signature recipes is the family-interchangeable form.
+  const groups = new Map<string, any[]>();
+  for (const r of recipes) {
+    const g = groups.get(signature(r));
+    if (g) g.push(r); else groups.set(signature(r), [r]);
+  }
+  const best = [...groups.values()].reduce((a, b) => (b.length > a.length ? b : a));
+  // Per family:count slot, gather the concrete names used across the group.
+  const slots = new Map<string, { family: string; count: number; names: Set<string> }>();
+  for (const r of best)
+    for (const [id, c] of recipeIngredients(r)) {
+      const name = nameOf(id), key = `${itemFamily(name)}:${c}`;
+      (slots.get(key) ?? slots.set(key, { family: itemFamily(name), count: c, names: new Set() }).get(key)!).names.add(name);
+    }
+  const rep = best[0];
+  return {
+    out: rep.result?.count ?? 1,
+    requiresTable: !!rep.requiresTable,
+    ingredients: [...slots.values()].map((s) => `${s.names.size > 1 ? `*_${s.family}` : [...s.names][0]} x${s.count}`),
+  };
+}
+
 const CARDINAL: Record<string, [number, number]> = {
   north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0],
 };
@@ -70,7 +106,7 @@ export const skills: Skill[] = [
   {
     tool: {
       name: "get_recipe",
-      description: "Show the first crafting recipe for an item: ingredients with counts, output count, and whether a crafting table is required.",
+      description: "Show the crafting recipe for an item: ingredients with counts, output count, and whether a crafting table is required. Interchangeable material families appear as a wildcard (e.g. *_planks).",
       input_schema: obj({ item: { type: "string" } }, ["item"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
@@ -78,13 +114,10 @@ export const skills: Skill[] = [
       const info = mcData.itemsByName[input.item];
       if (!info) return `unknown item "${input.item}"`;
       try {
-        const recipe = bot.recipesAll(info.id, null, true)[0];
-        if (!recipe) return `no recipe for ${input.item}`;
-        const ings = [...recipeIngredients(recipe).entries()]
-          .map(([id, c]) => `${mcData.items[id]?.name ?? id} x${c}`)
-          .join(", ");
-        const out = recipe.result?.count ?? 1;
-        return `${input.item} x${out} from ${ings || "unknown ingredients"} (crafting table ${recipe.requiresTable ? "required" : "not needed"})`;
+        const recipes = bot.recipesAll(info.id, null, true) as any[];
+        if (!recipes.length) return `no recipe for ${input.item}`;
+        const { out, requiresTable, ingredients } = consolidateRecipe(recipes, mcData);
+        return `${input.item} x${out} from ${ingredients.join(", ") || "unknown ingredients"} (crafting table ${requiresTable ? "required" : "not needed"})`;
       } catch (err) {
         return `error: ${(err as Error).message}`;
       }

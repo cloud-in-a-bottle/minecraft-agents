@@ -71,7 +71,7 @@ export function loadConfig(): AppConfig {
   return {
     port: Number(env("PORT", "8080")),
     dbPath: process.env.DB_PATH || join(dataDir, "minecraft-agents.db"),
-    rulesDir: process.env.RULES_DIR || join(dataDir, "settings"),
+    libraryDir: process.env.LIBRARY_DIR || join(dataDir, "library"),
     mc,
     llm,
     bots: resolveBots(),

@@ -23,6 +23,7 @@ memory_mb = 6144
 cpu_millicores = 3000
 
 [data]
-# Persistent state at $OPENHOST_APP_DATA_DIR: SQLite DB (settings, ownership,
-# memory, routines) plus a settings/ dir of bot-authored reactive rules.
+# Persistent state at $OPENHOST_APP_DATA_DIR: SQLite DB (dashboard settings,
+# ownership, per-owner memory) plus a shared library/ dir of bot-authored
+# routines and reactive settings (JSON files, not the DB).
 app_data = true

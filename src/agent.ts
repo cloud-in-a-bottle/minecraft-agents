@@ -147,6 +147,8 @@ export class Agent {
       bot.pathfinder.tickTimeout = 10; // ms/tick spent pathfinding (default 40)
       bot.pathfinder.thinkTimeout = 3000; // give up a single search sooner (default 5000)
       (bot.pathfinder as any).searchRadius = 128; // don't A* the whole world for far/blocked goals
+      this.behaviors.add("defend"); // eat-when-hungry + defend-when-attacked are always on by default
+      this.behaviors.add("auto_eat");
       (bot as any)._behaviors = this.behaviors;
       installAutoBehaviors(bot, () => this.mcData, (name) => name === this.owner || /^agent_\d+$/i.test(name), () => this.makeCtx());
       startChunkPrune(bot, this.mc.chunkKeepRadius);

@@ -53,7 +53,7 @@ One process, one config → the whole roster. Set these on the OpenHost app.
 | `DISPATCHER_RECYCLE_MIN` | `45` | Minutes between dispatcher reconnects to reset its accumulated chunk memory (it never logs out); `0` disables |
 | `PORT` | `8080` | HTTP port (matches `openhost.toml`) |
 | `DB_PATH` | `$OPENHOST_APP_DATA_DIR/minecraft-agents.db` | SQLite file for persisted state; falls back to `$DATA_DIR` then `./data` locally |
-| `RULES_DIR` | `$OPENHOST_APP_DATA_DIR/settings` | Directory holding bot-authored reactive settings (one JSON file per rule; not the DB) |
+| `LIBRARY_DIR` | `$OPENHOST_APP_DATA_DIR/library` | Shared library of bot-authored **routines** (`routines/`) and **settings** (`settings/`), as JSON files (not the DB); one collection every agent reads and writes |
 
 Env vars **seed** the config; live settings (host, port, login, per-user cap)
 saved in the DB **override** them on the next boot (see Persistence below).
@@ -166,11 +166,12 @@ State lives in a SQLite DB (`node:sqlite`, no native build) on the OpenHost
   model, step budget. Override the env seed at boot, so dashboard edits survive a restart/redeploy.
 - **Ownership** — each `agent_N`'s owner, so owned/reserved numbers persist across
   restarts (offline placeholders are recreated at boot).
-- **Memory** — per-scope waypoints, notes, and the task ledger.
-- **Routines** — self-authored replayable procedures, scoped per owner.
+- **Memory** — per-owner waypoints, notes, and the task ledger.
 
-Bot-authored **reactive settings** (`create_setting`) live **outside** the DB, as
-one JSON file per rule under `RULES_DIR` (`settings/<owner>/<name>.json`).
+Bot-authored **routines** (`save_routine`) and **reactive settings**
+(`create_setting`) live **outside** the DB, as JSON files in a single shared
+library (`LIBRARY_DIR` → `library/routines/` and `library/settings/`) that every
+agent — across all owners — reads and writes. One file per procedure/rule.
 
 Agent logs, token/traffic counters, and live bot connections stay in-memory
 (diagnostic, high-churn). Delete the DB file to reset all persisted state.

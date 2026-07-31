@@ -2,7 +2,9 @@ import { Agent } from "./agent.js";
 import { Dispatcher } from "./dispatcher.js";
 import { type PeerApi, type SkillEnv } from "./skillkit.js";
 import { FileRuleStore } from "./rulestore.js";
+import { FileRoutineStore } from "./routinestore.js";
 import { MODELS, normalizeModel } from "./config.js";
+import { join } from "node:path";
 import type { Store } from "./store.js";
 import type { AppConfig, AgentStatus, BatchResult, BotSpec, CreateResult, SpawnResult } from "./types.js";
 
@@ -13,6 +15,7 @@ export class BotManager {
   private readonly env: SkillEnv;
   private readonly keys: { anthropic: string; openai: string }; // planner keys shared by the fleet
   private readonly rules: FileRuleStore;
+  private readonly routines: FileRoutineStore;
   private nextNumber: number;
   private maxPerUser: number;
 
@@ -20,7 +23,9 @@ export class BotManager {
     this.loadSettings(); // durable settings override the env-var seed
     this.maxPerUser = config.maxPerUser;
     this.keys = { anthropic: config.llm.apiKey, openai: config.llm.openaiApiKey };
-    this.rules = new FileRuleStore(config.rulesDir);
+    // One shared library for the whole fleet: routines/ and settings/ as JSON files (not the DB).
+    this.routines = new FileRoutineStore(join(config.libraryDir, "routines"));
+    this.rules = new FileRuleStore(join(config.libraryDir, "settings"));
     const peers: PeerApi = {
       position: (name) => this.agents.get(name)?.position() ?? null,
       online: (name) => !!this.agents.get(name)?.isOnline(),
@@ -35,7 +40,7 @@ export class BotManager {
         owner === null ? [] : [...this.agents.entries()].filter(([, a]) => a.owner === owner && a.isOnline()).map(([name]) => name),
       summon: (count, goal, owner) => this.createNew(count, goal, owner),
     };
-    this.env = { memory: store, peers, routines: store, rules: this.rules };
+    this.env = { memory: store, peers, routines: this.routines, rules: this.rules };
     this.dispatcher = new Dispatcher(config.dispatcherName, config.mc, config.commandAllowlist, {
       createNew: (count, goal, owner) => this.createNew(count, goal, owner),
       assignExisting: (nums, goal, owner) => this.assignExisting(nums, goal, owner),

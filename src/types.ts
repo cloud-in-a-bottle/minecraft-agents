@@ -40,8 +40,8 @@ export interface AppConfig {
   port: number;
   /** SQLite file for settings, ownership, and memory (OpenHost app-data dir). */
   dbPath: string;
-  /** Directory holding bot-authored reactive settings (one JSON file per rule; not the DB). */
-  rulesDir: string;
+  /** Shared library dir for bot-authored routines + settings (JSON files, not the DB); has `routines/` and `settings/` subdirs. */
+  libraryDir: string;
   mc: McConfig;
   llm: LlmConfig;
   bots: BotSpec[];

@@ -1,4 +1,4 @@
-import { obj, scopeOf, type Rule, type Skill, type SkillContext } from "../skillkit.js";
+import { obj, SHARED_SCOPE, type Rule, type Skill, type SkillContext } from "../skillkit.js";
 import { referencedTools } from "../routines.js";
 
 const FORBIDDEN = ["save_routine", "task_complete", "create_setting", "delete_setting", "list_settings"];
@@ -39,7 +39,7 @@ export const skills: Skill[] = [
       const bad = [...refs].filter((t) => FORBIDDEN.includes(t));
       if (bad.length) return `settings can't use: ${bad.join(", ")}`;
       const rule: Rule = { name: String(input.name), condition, steps, enabled: true };
-      ctx.rules.saveRule(scopeOf(ctx), rule);
+      ctx.rules.saveRule(SHARED_SCOPE, rule);
       return `saved setting "${rule.name}": when ${condition}, run ${refs.size} skill(s)`;
     },
   },
@@ -50,7 +50,7 @@ export const skills: Skill[] = [
       input_schema: obj({}, []),
     },
     run: async (ctx: SkillContext, _input: any): Promise<string> => {
-      const rules = ctx.rules.listRules(scopeOf(ctx));
+      const rules = ctx.rules.listRules(SHARED_SCOPE);
       if (!rules.length) return "no settings yet";
       return rules.map((r) => `${r.name} [${r.enabled ? "on" : "off"}]: when ${r.condition}`).join("\n");
     },
@@ -62,7 +62,7 @@ export const skills: Skill[] = [
       input_schema: obj({ name: { type: "string" }, enabled: { type: "boolean" } }, ["name", "enabled"]),
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
-      const scope = scopeOf(ctx);
+      const scope = SHARED_SCOPE;
       const name = String(input.name);
       const rule = ctx.rules.listRules(scope).find((r) => r.name === name);
       if (!rule) return `no setting "${name}"`;
@@ -79,7 +79,7 @@ export const skills: Skill[] = [
     },
     run: async (ctx: SkillContext, input: any): Promise<string> => {
       const name = String(input.name);
-      const ok = ctx.rules.deleteRule(scopeOf(ctx), name);
+      const ok = ctx.rules.deleteRule(SHARED_SCOPE, name);
       return ok ? `deleted setting "${name}"` : `no setting "${name}"`;
     },
   },

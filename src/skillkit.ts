@@ -18,6 +18,9 @@ export const obj = (properties: Record<string, unknown>, required: string[]): An
 /** Memory scope for a context: the owner if any, else the bot's own name. */
 export const scopeOf = (ctx: SkillContext): string => ctx.self.owner ?? ctx.self.username;
 
+/** Scope for the routine + settings library: one shared collection for every agent. */
+export const SHARED_SCOPE = "shared";
+
 /** Everything a skill/behavior needs. bot/mcData are mineflayer (typed as any). */
 export interface SkillContext {
   bot: any;

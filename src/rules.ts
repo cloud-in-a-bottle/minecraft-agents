@@ -1,5 +1,5 @@
 import { evalCondition, runSteps, type RunCtx } from "./routines.js";
-import { scopeOf, type SkillContext } from "./skillkit.js";
+import { SHARED_SCOPE, type SkillContext } from "./skillkit.js";
 
 /** Drives bot-authored reactive rules: on each tick, fire any rule whose condition holds. */
 export class RuleEngine {
@@ -7,8 +7,7 @@ export class RuleEngine {
   private readonly cooldownUntil = new Map<string, number>();
 
   tick(ctx: SkillContext, exec: (tool: string, args: any) => Promise<string>): void {
-    const scope = scopeOf(ctx);
-    for (const rule of ctx.rules.listRules(scope)) {
+    for (const rule of ctx.rules.listRules(SHARED_SCOPE)) {
       try {
         if (!rule.enabled || this.running.has(rule.name)) continue;
         if (Date.now() < (this.cooldownUntil.get(rule.name) ?? 0)) continue;

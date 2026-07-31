@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "mineflayer";
 import type { Vec3 as Vec3T } from "vec3";
-import { obj, scopeOf, type SkillContext } from "./skillkit.js";
+import { obj, SHARED_SCOPE, type SkillContext } from "./skillkit.js";
 import { ALL_BEHAVIORS, ALL_SKILLS } from "./registry.js";
 import { Vec3, goals, nearestHostile, sleep, withTimeout } from "./deps.js";
 import { RoutineError, referencedTools, runSteps, type RunCtx } from "./routines.js";
@@ -338,21 +338,21 @@ export async function execute(bot: Bot, mcData: any, name: string, input: Input,
         const refs = referencedTools(steps);
         const bad = [...refs].filter((t) => !TOOL_NAMES.has(t) || ROUTINE_FORBIDDEN.has(t));
         if (bad.length) return `steps reference tools that can't be used in a routine: ${bad.join(", ")}`;
-        ctx.routines.saveRoutine(scopeOf(ctx), { name: String(input.name), description: String(input.description ?? ""), steps });
+        ctx.routines.saveRoutine(SHARED_SCOPE, { name: String(input.name), description: String(input.description ?? ""), steps });
         return `saved routine "${input.name}" (${refs.size} distinct skills)`;
       }
 
       case "list_routines": {
-        const list = ctx.routines.listRoutines(scopeOf(ctx));
+        const list = ctx.routines.listRoutines(SHARED_SCOPE);
         return list.length ? list.map((r) => `${r.name}: ${r.description}`).join("\n") : "no routines saved yet";
       }
 
       case "run_routine": {
         const depth = (ctx as any)._routineDepth ?? 0;
         if (depth >= 3) return "routine nesting too deep (max 3)";
-        const routine = ctx.routines.getRoutine(scopeOf(ctx), String(input.name));
+        const routine = ctx.routines.getRoutine(SHARED_SCOPE, String(input.name));
         if (!routine) {
-          const names = ctx.routines.listRoutines(scopeOf(ctx)).map((r) => r.name).join(", ") || "none";
+          const names = ctx.routines.listRoutines(SHARED_SCOPE).map((r) => r.name).join(", ") || "none";
           return `no routine "${input.name}" (known: ${names})`;
         }
         const childCtx = { ...ctx, _routineDepth: depth + 1 } as SkillContext;
