@@ -46,10 +46,10 @@ const DASHBOARD = `<!doctype html><meta charset=utf-8>
   <span class=stat>traffic <span id=net>0</span></span>
   <span class=stat>server <input id=host placeholder=host style="width:200px"> : <input id=port type=number style="width:78px"></span>
   <span class=stat>login <input id=login type=text placeholder="/login <pw>" style="width:200px" title="sent on join; two-step with &&, e.g. /register <pw> <pw> && /login <pw>"></span>
-  <button id=apply disabled title="reconnects the fleet">apply</button>
-  <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon, no restart"></span>
-  <span class=stat>model <select id=model title="planner for new tasks; applies to each worker's next task, no restart"></select></span>
-  <span class=stat>max steps <input id=maxsteps type=number min=1 max=1000 title="skill calls per goal (1-1000); applies to in-flight and future tasks, no restart"></span>
+  <span class=stat>per-user cap <input id=cap type=number min=0 title="0 = unlimited; applies to next summon"></span>
+  <span class=stat>model <select id=model title="planner for new tasks"></select></span>
+  <span class=stat>max steps <input id=maxsteps type=number min=1 max=1000 title="skill calls per goal (1-1000)"></span>
+  <button id=apply disabled title="apply staged settings (reconnects the fleet only if host/port/login changed)">apply</button>
   <span class=stat muted id=upd></span>
 </header>
 <div id=wrap><table>
@@ -69,18 +69,20 @@ const stepsEl = document.getElementById('maxsteps');
 const hostEl = document.getElementById('host'), portEl = document.getElementById('port'), loginEl = document.getElementById('login');
 const applyEl = document.getElementById('apply');
 const postCfg = patch => fetch('/config', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(patch) });
-capEl.addEventListener('change', () => { const v=Number(capEl.value); if(v>=0) postCfg({ maxPerUser: v }); });
-modelEl.addEventListener('change', () => postCfg({ model: modelEl.value }));
-stepsEl.addEventListener('change', () => { const v=Number(stepsEl.value); if(Number.isInteger(v)&&v>=1&&v<=1000) postCfg({ maxSteps: v }); });
-// Server host/port/login are staged and applied together (they reconnect the fleet).
+// All settings are staged and applied together via the apply button.
 let dirty = false;
 const markDirty = () => { dirty = true; applyEl.disabled = false; applyEl.textContent = 'apply'; };
-[hostEl, portEl, loginEl].forEach(el => el.addEventListener('input', markDirty));
+[hostEl, portEl, loginEl, capEl, stepsEl].forEach(el => el.addEventListener('input', markDirty));
+modelEl.addEventListener('change', markDirty);
 applyEl.addEventListener('click', async () => {
   const p = Number(portEl.value);
   if (!Number.isInteger(p) || p < 1 || p > 65535) { applyEl.textContent = 'bad port'; return; }
+  const cap = Number(capEl.value);
+  if (!Number.isInteger(cap) || cap < 0) { applyEl.textContent = 'bad cap'; return; }
+  const steps = Number(stepsEl.value);
+  if (!Number.isInteger(steps) || steps < 1 || steps > 1000) { applyEl.textContent = 'bad steps'; return; }
   applyEl.disabled = true; applyEl.textContent = 'applying…';
-  const r = await postCfg({ mcHost: hostEl.value.trim(), mcPort: p, loginMessage: loginEl.value }).catch(() => null);
+  const r = await postCfg({ mcHost: hostEl.value.trim(), mcPort: p, loginMessage: loginEl.value, maxPerUser: cap, model: modelEl.value, maxSteps: steps }).catch(() => null);
   if (r && r.ok) { dirty = false; applyEl.textContent = 'applied'; }
   else { applyEl.disabled = false; applyEl.textContent = 'failed'; }
 });
@@ -117,15 +119,15 @@ async function tick(){
       fetch('/dispatcher').then(r=>r.json()).catch(()=>({})),
       fetch('/config').then(r=>r.json()).catch(()=>({})),
     ]);
-    if (document.activeElement !== capEl && cfg.maxPerUser != null) capEl.value = cfg.maxPerUser;
     if (Array.isArray(cfg.models) && modelEl.options.length !== cfg.models.length)
       modelEl.innerHTML = cfg.models.map(m => '<option value="'+m+'">'+m+'</option>').join('');
-    if (document.activeElement !== modelEl && cfg.model != null) modelEl.value = cfg.model;
-    if (document.activeElement !== stepsEl && cfg.maxSteps != null) stepsEl.value = cfg.maxSteps;
     if (!dirty) {  // don't clobber staged edits before they're applied
       if (cfg.mcHost != null) hostEl.value = cfg.mcHost;
       if (cfg.mcPort != null) portEl.value = cfg.mcPort;
       if (cfg.loginMessage != null) loginEl.value = cfg.loginMessage;
+      if (cfg.maxPerUser != null) capEl.value = cfg.maxPerUser;
+      if (cfg.model != null) modelEl.value = cfg.model;
+      if (cfg.maxSteps != null) stepsEl.value = cfg.maxSteps;
     }
     const online = !!disp.online;
     document.getElementById('conn').className = 'conn ' + (online?'on':'off');

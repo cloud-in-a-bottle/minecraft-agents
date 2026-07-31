@@ -49,10 +49,14 @@ aggregated in `src/registry.ts`.
 | `craft_item` | `name, count` | Craft, using a nearby crafting table if required |
 | `equip_item` | `name, destination` | Equip to `hand`/`head`/`torso`/`legs`/`feet`/`off-hand` |
 
-Every digging skill (`collect_block`, `mine_block`, `strip_mine`, `dig_staircase`,
-`dig_down_safe`) **auto-equips the fastest suitable tool** for each block via
-`mineflayer-tool` (e.g. an axe for wood, the right pickaxe for stone/ore). Use
-`equip_item` only for manual control — armor, weapons, or a specific held item.
+Every digging skill **auto-equips the fastest suitable tool** for each block via
+`mineflayer-tool` (e.g. an axe for wood, the right pickaxe for stone/ore).
+Targeted mining (`collect_block`, `mine_block`) requires a **harvest-capable**
+tool — if nothing carried would make the block drop (e.g. iron ore with a wooden
+pickaxe), it **refuses** with a clear message instead of mining for no drop.
+Traversal digs (`strip_mine`, `dig_staircase`, `dig_down_safe`) still equip the
+fastest tool but dig regardless, to keep tunnelling. Use `equip_item` only for
+manual control — armor, weapons, or a specific held item.
 
 ## Tech tree · mining
 

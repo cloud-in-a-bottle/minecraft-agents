@@ -120,6 +120,8 @@ class OpenAiPlanner implements Planner {
       model: params.model,
       messages,
       ...(tools ? { tools, tool_choice: "auto" } : {}),
+      // Reasoning models default effort to non-none, which chat.completions rejects alongside function tools.
+      reasoning_effort: "none",
       max_completion_tokens: params.max_tokens,
     } as any);
 

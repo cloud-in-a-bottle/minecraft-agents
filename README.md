@@ -87,17 +87,16 @@ step + conversation length, tokens in/out, cache-read tokens, **network in/out**
 and health/food, with dispatcher status, fleet token + **traffic** totals in the
 header. Traffic = real Minecraft socket bytes (on-wire) per bot + approximate API
 request/response bytes; summed across all workers and the dispatcher. The header
-also has **live-editable controls** — the Minecraft server host/port and login
-message (staged, then **apply** together — this reconnects the fleet), the
-per-user cap (inline), the **planner model** (dropdown; applies to each worker's
-next task), and the **step budget** (`max steps`; applies to in-flight and future
-tasks) — all with no restart. A colored dot shows whether the dispatcher is connected.
-**Click any row (or the dispatcher)** to open its log — spawn/kick reasons, server
-auth replies (`srv:`), and the step-by-step tool calls and results. The **per-user cap is
-editable inline** (header input → `POST /config`); it takes effect on the next
-summon with no restart and without disconnecting any running agent. Enforced for
-in-game players (owner `api`/HTTP admin is exempt); over-cap `new` requests are
-truncated and the dispatcher says so in chat.
+also has **live-editable controls** — the Minecraft server host/port, login
+message, per-user cap, **planner model** (dropdown), and **step budget** (`max
+steps`). All are **staged and applied together** with the **apply** button (no
+restart); the fleet reconnects only if host/port/login changed. The model applies
+to each worker's next task, the step budget to in-flight and future tasks, and the
+per-user cap to the next summon. A colored dot shows whether the dispatcher is
+connected. **Click any row (or the dispatcher)** to open its log — spawn/kick
+reasons, server auth replies (`srv:`), and the step-by-step tool calls and results.
+The per-user cap is enforced for in-game players (owner `api`/HTTP admin is exempt);
+over-cap `new` requests are truncated and the dispatcher says so in chat.
 
 ## In-game chat commands
 
