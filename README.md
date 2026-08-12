@@ -1,6 +1,6 @@
 # minecraft-agents
 
-The bot-side component: one OpenHost app running a persistent **dispatcher**
+The bot-side component: one Cloud in a Bottle app running a persistent **dispatcher**
 player that players tag in-game to summon LLM-controlled Mineflayer **worker**
 bots on a Minecraft Java server. Each worker connects as a normal client,
 pursues one natural-language goal via a Claude planning loop over a fixed skill
@@ -28,12 +28,12 @@ the server (offline backend behind a Velocity proxy, or any reachable host).
 
 ## Configuration (env vars)
 
-One process, one config → the whole roster. Set these on the OpenHost app.
+One process, one config → the whole roster. Set these on the Cloud in a Bottle app.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Claude planner key. **Local dev only** — in production it's pulled from the OpenHost **secrets** service at boot (grant the `ANTHROPIC_API_KEY` secret); see `openhost.toml`. |
-| `OPENAI_API_KEY` | — | OpenAI planner key, needed only when a bot uses the `gpt-5.6-luna` model. Resolved like `ANTHROPIC_API_KEY` (env var locally, else OpenHost secrets). |
+| `ANTHROPIC_API_KEY` | — | Claude planner key. **Local dev only** — in production it's pulled from the Cloud in a Bottle **secrets** service at boot (grant the `ANTHROPIC_API_KEY` secret); see `openhost.toml`. |
+| `OPENAI_API_KEY` | — | OpenAI planner key, needed only when a bot uses the `gpt-5.6-luna` model. Resolved like `ANTHROPIC_API_KEY` (env var locally, else Cloud in a Bottle secrets). |
 | `MC_HOST` | `localhost` | Server host — **also editable live in the dashboard** |
 | `MC_PORT` | `25565` | Server port — **also editable live in the dashboard** |
 | `MC_VERSION` | auto | Pin if auto-detect fails |
@@ -63,7 +63,7 @@ optional; those workers have no owner and so aren't reusable through `@agents`.
 
 ## Control API
 
-All routes are login-gated by the OpenHost router (nothing is public).
+All routes are login-gated by the Cloud in a Bottle router (nothing is public).
 
 | Method | Path | Body | Action |
 |---|---|---|---|
@@ -77,7 +77,7 @@ All routes are login-gated by the OpenHost router (nothing is public).
 | POST | `/bots/:name/stop` | — | Disconnect a worker |
 | POST | `/dev/reset` | `{"confirm":true}` | **Dev:** disconnect + forget every agent and its memory; **keeps** live settings and the shared routine/settings library → `{removed:N}` |
 
-The HTTP channel is admin (owner-gated by the OpenHost router) and bypasses the
+The HTTP channel is admin (owner-gated by the Cloud in a Bottle router) and bypasses the
 in-game ownership check.
 
 `GET /` serves a **live dashboard** — a scrolling, auto-refreshing (1.5s) summary
@@ -129,7 +129,7 @@ oh app logs minecraft-agents
 ```
 
 Then:
-1. Store the planner key in the OpenHost **secrets** service under `ANTHROPIC_API_KEY`
+1. Store the planner key in the Cloud in a Bottle **secrets** service under `ANTHROPIC_API_KEY`
    and approve this app's grant for it (the app fetches it at boot).
 2. Open the app dashboard (`GET /`) and set the **server host/port** and **login
    message** (e.g. `/login <pw>`) — live, no restart.
@@ -163,7 +163,7 @@ one event loop can only do so much.
 
 ## Persistence
 
-State lives in a SQLite DB (`node:sqlite`, no native build) on the OpenHost
+State lives in a SQLite DB (`node:sqlite`, no native build) on the Cloud in a Bottle
 `app_data` volume (`$OPENHOST_APP_DATA_DIR`), written on every change:
 
 - **Dashboard settings** — server host/port, login message, per-user cap, planner
