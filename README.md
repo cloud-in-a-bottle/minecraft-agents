@@ -1,3 +1,5 @@
+# **THIS IS WIP AND NONE OF THE CODE IS VETTED. RUN AT YOUR OWN RISK**
+
 # minecraft-agents
 
 The bot-side component: one Cloud in a Bottle app running a persistent **dispatcher**
